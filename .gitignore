@@ -1,0 +1,34 @@
+# --- Secrets & device material (NEVER commit) ---
+.env
+*.env
+config.toml
+session.json
+token.json
+*.pem
+*.key
+*.crt
+*.p12
+*.bks
+certs/
+secrets/
+
+# --- Never vendor the vendor app ---
+*.apk
+*.dex
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+build/
+dist/
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
