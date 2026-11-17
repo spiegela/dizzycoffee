@@ -90,6 +90,47 @@ uv run python -m dizzycoffee send --hex 0602  # raw escape hatch
 > `power`/`start`/`stop`/`flush` opcodes are confirmed from the app but their individual effects
 > aren't separately exercised yet. Details in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
+## Home Assistant integration
+
+A native custom integration lives in [`custom_components/spinn/`](custom_components/spinn/).
+It reuses this repo's live-verified client (`dizzycoffee`) rather than reimplementing the
+protocol: config-flow sign-in → device + certificate fetch → an AWS IoT **shadow push**
+subscription (`cloud_push`) with a periodic re-read as a fallback.
+
+**Entities**
+
+- **Sensors:** beans, water tank + volume, grounds bin (+ capacity), drip tray (+ capacity),
+  machine/process status, shot count, Wi-Fi/air-pressure, and the maintenance counters
+  (grinder, filter, cups-since-deep-clean, cups-since-descale, cold-brew).
+- **Binary sensors:** connected, brewing (`MachineStatus == PREPAREDRINK`), error
+  (`MachineStatus == MACHINEERROR`).
+- **Buttons (these actuate your machine):** Brew, Start, Stop, Hopper flush.
+- **Select:** Recipe slot — a *local* picker for which cookbook slot the **Brew** button
+  uses (changing it sends nothing; only the button actuates).
+
+Credentials are exchanged once for a session **token** (access + refresh) stored in the
+config entry — your password is never stored. The per-machine certificate is fetched fresh
+from `GET link/api/devices/{thing}` on each refresh cycle, never written to disk.
+
+### Install via HACS
+
+1. In HACS → **⋮** → *Custom repositories*, add `https://github.com/spiegela/dizzycoffee`
+   with category **Integration**.
+2. Install **Spinn Coffee Maker**, then restart Home Assistant.
+3. **Settings → Devices & Services → Add Integration → Spinn**, and sign in with your Spinn
+   account. If the account has more than one machine, you'll be asked to pick one.
+
+> **Library requirement.** The integration imports the `dizzycoffee` package (the client in
+> this repo). Its own dependencies (`awsiotsdk`, `certifi`, `requests`) install automatically
+> from the manifest, but `dizzycoffee` itself must also be importable by Home Assistant. Until
+> it's published to PyPI (so it can be added to the manifest `requirements` for a one-click
+> install), make it available in your HA Python environment — e.g. on a container/Core install
+> `pip install git+https://github.com/spiegela/dizzycoffee`, or vendor the package. On Home
+> Assistant OS, publishing to PyPI + adding it to `requirements` is the supported path.
+
+> Publishing to `<thing>/host` **actuates the machine**. The Brew/Start/Stop/Flush buttons do
+> exactly that — treat them like pressing the machine's own buttons.
+
 ## Credits
 
 Protocol recovered by static analysis of the official Android app for personal interoperability.
