@@ -33,3 +33,8 @@ MANUFACTURER = "Spinn"
 # shadow ``update/documents`` stream; this is a safety-net re-read that also
 # refreshes the device record (and rotates the fetched certificate).
 UPDATE_INTERVAL_SECONDS = 120
+
+# Lovelace dashboard cards (served by the integration; see frontend/).
+CARD_VERSION = "0.1.0"
+FRONTEND_URL_BASE = f"/{DOMAIN}_cards"
+FRONTEND_SCRIPT = "spinn-card.js"
