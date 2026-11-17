@@ -8,8 +8,9 @@ instead of the vendor's phone app.
 
 > **Status:** the **read path is live-verified** against a real machine — sign-in, device +
 > certificate fetch, AWS IoT mutual-TLS, and reading the device shadow all work
-> ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)). A **read-only** Python client is included. Writing
-> commands (brew/start/stop) is specified but intentionally not wired into the CLI yet.
+> ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)). Commands (brew/start/stop/…) are implemented but
+> **confirmation-gated and not yet verified on hardware** — use `--dry-run` to see exactly what
+> would be sent, and expect to confirm the brew sequence / slot numbering on your own machine.
 
 ## What this is
 
@@ -61,12 +62,34 @@ uv run python -m dizzycoffee state
 The login step writes a session token to `~/.config/dizzycoffee/session.json` (outside this
 repo). The device certificate is fetched fresh each run and never written to disk.
 
-### Read-only by design
+### Read vs. command paths
 
-`state` and `devices` only **read** (`shadow/get`, `shadow/update/documents`). This client does
-not publish to the command topic, so it cannot brew, start, stop, or otherwise actuate the
-machine. Command support is documented in `docs/PROTOCOL.md` and will be added behind an explicit,
-opt-in flag.
+`state` and `devices` only **read** (`shadow/get`, `shadow/update/documents`) and cannot actuate the
+machine — the read and command paths live in separate modules (`shadow.py` vs `commands.py`).
+
+## Commands (opt-in — these actuate your machine)
+
+Every command below publishes to the device's command topic and **physically drives the machine**.
+Each one is gated: it prints what it will send and waits for you to type `YES` (or pass `--yes` for
+scripts). Use `--dry-run` first to see the exact hex without connecting to anything.
+
+```bash
+# See the wire bytes for a brew of cookbook slot 2 — sends nothing:
+uv run python -m dizzycoffee brew --slot 2 --dry-run
+
+# Actually brew slot 2 (prompts for confirmation; stand at the machine):
+uv run python -m dizzycoffee brew --slot 2
+
+uv run python -m dizzycoffee power on|off     # switch on / off
+uv run python -m dizzycoffee start | stop     # start / stop
+uv run python -m dizzycoffee flush            # hopper flush
+uv run python -m dizzycoffee send --hex 0602  # raw escape hatch
+```
+
+> **Unverified bits.** The opcode table is confirmed from the app, but the exact brew sequence
+> (`brew` defaults to `SELECT_RECIPE` then `PREPARE_RECIPE`; try `--sequence prepare` for
+> `PREPARE_RECIPE` alone) and whether the `--slot` byte is 0- or 1-based still need confirming on a
+> real machine. See the `[L]` items in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
 ## Credits
 

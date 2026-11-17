@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import json
 import queue
-import uuid
 from typing import Any, Callable
 
-import certifi
 from awscrt import mqtt
-from awsiot import mqtt_connection_builder
+
+from . import connection
 
 QOS1 = mqtt.QoS.AT_LEAST_ONCE
 
@@ -35,19 +34,7 @@ class ReadOnlyShadow:
 
     # --- lifecycle ----------------------------------------------------------
     def connect(self, timeout: float = 15.0) -> None:
-        client_id = "dizzy-" + uuid.uuid4().hex[:12]
-        # Server cert (Amazon Trust Services on the ATS endpoint) is validated against
-        # the certifi CA bundle — portable across macOS/Linux/Home Assistant.
-        self._conn = mqtt_connection_builder.mtls_from_bytes(
-            endpoint=self.endpoint,
-            port=8883,
-            cert_bytes=self._cert.encode(),
-            pri_key_bytes=self._key.encode(),
-            ca_filepath=certifi.where(),
-            client_id=client_id,
-            clean_session=True,
-            keep_alive_secs=30,
-        )
+        self._conn = connection.build(self.endpoint, self._cert, self._key)
         self._conn.connect().result(timeout)
 
     def disconnect(self, timeout: float = 10.0) -> None:

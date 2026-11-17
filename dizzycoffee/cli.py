@@ -65,6 +65,21 @@ def _pick_device(devices: list[dict], thing: str | None) -> dict:
     raise SystemExit(f"Multiple machines; pass --thing <name>. Found: {names}")
 
 
+def _device_for_connect(cfg: Config, thing: str | None) -> tuple[str, str, str]:
+    """Resolve (thing_name, cert_pem, private_key) for the selected machine.
+
+    The usable certificate only comes from the single-device endpoint.
+    """
+    client, devices = _get_devices_with_refresh(cfg)
+    dev = _pick_device(devices, thing)
+    full = client.get_device(dev["thing_name"])
+    cert = full.get("certificate") or {}
+    pem, key = cert.get("certificate_pem"), cert.get("certificate_private_key")
+    if not (pem and key):
+        raise SystemExit("Selected machine has no usable certificate; cannot connect.")
+    return full["thing_name"], pem, key
+
+
 # --------------------------------------------------------------------------
 # commands
 # --------------------------------------------------------------------------
@@ -130,15 +145,7 @@ def _print_state(doc: dict, raw: bool) -> None:
 def cmd_state(cfg: Config, args) -> int:
     from .shadow import ReadOnlyShadow  # lazy import (awscrt) so other cmds don't need it
 
-    client, devices = _get_devices_with_refresh(cfg)
-    dev = _pick_device(devices, args.thing)
-    # The usable cert only comes from the single-device endpoint.
-    full = client.get_device(dev["thing_name"])
-    cert = full.get("certificate") or {}
-    pem, key = cert.get("certificate_pem"), cert.get("certificate_private_key")
-    if not (pem and key):
-        raise SystemExit("Selected machine has no usable certificate; cannot connect.")
-    thing = full["thing_name"]
+    thing, pem, key = _device_for_connect(cfg, args.thing)
     sh = ReadOnlyShadow(cfg.iot_endpoint, thing, pem, key)
     print(f"Connecting to {cfg.iot_endpoint} as {thing} (read-only)…")
     sh.connect()
@@ -153,6 +160,122 @@ def cmd_state(cfg: Config, args) -> int:
     finally:
         sh.disconnect()
     return 0
+
+
+# --------------------------------------------------------------------------
+# commands that ACTUATE the machine (opt-in, confirmation-gated)
+# --------------------------------------------------------------------------
+def _actuate(cfg: Config, args, steps, desc: str) -> int:
+    """Publish one or more command steps to <thing>/host after confirmation.
+
+    steps: list of (DeviceCommand, param|None). --dry-run prints the hex and does
+    not connect or publish. Otherwise requires --yes or an interactive 'YES'.
+    """
+    import time
+    from .commands import encode, DeviceCommander
+
+    payloads = [encode(c, p) for c, p in steps]
+    if args.dry_run:
+        print(f"[dry-run] {desc} — nothing sent")
+        for pl in payloads:
+            print(f"  would publish: {pl!r}  ->  <thing>/host")
+        return 0
+
+    thing, pem, key = _device_for_connect(cfg, args.thing)
+    print(f"⚠️  This WILL actuate your physical Spinn ({thing}).")
+    print(f"   {desc}")
+    for pl in payloads:
+        print(f"   publish: {pl!r} -> {thing}/host")
+    if not args.yes:
+        try:
+            if input("   Type YES to proceed: ").strip() != "YES":
+                print("Aborted — nothing sent."); return 1
+        except EOFError:
+            print("Aborted (no TTY; pass --yes to actuate non-interactively)."); return 1
+
+    cmder = DeviceCommander(cfg.iot_endpoint, thing, pem, key)
+    cmder.connect()
+    try:
+        for i, (c, p) in enumerate(steps):
+            res = cmder.send(c, p)
+            print(f"   sent {res['payload']} | acks: {res['acks'] or '(none within timeout)'}")
+            if i + 1 < len(steps):
+                time.sleep(1.0)
+    finally:
+        cmder.disconnect()
+    return 0
+
+
+def cmd_power(cfg: Config, args) -> int:
+    from .commands import DeviceCommand
+    on = args.state == "on"
+    c = DeviceCommand.SWITCH_ON if on else DeviceCommand.SWITCH_OFF
+    return _actuate(cfg, args, [(c, None)], f"power {'ON' if on else 'OFF'}")
+
+
+def cmd_start(cfg: Config, args) -> int:
+    from .commands import DeviceCommand
+    return _actuate(cfg, args, [(DeviceCommand.START, None)], "START")
+
+
+def cmd_stop(cfg: Config, args) -> int:
+    from .commands import DeviceCommand
+    return _actuate(cfg, args, [(DeviceCommand.STOP, None)], "STOP")
+
+
+def cmd_flush(cfg: Config, args) -> int:
+    from .commands import DeviceCommand
+    return _actuate(cfg, args, [(DeviceCommand.HOPPER_FLUSH, None)], "HOPPER_FLUSH")
+
+
+def cmd_brew(cfg: Config, args) -> int:
+    from .commands import DeviceCommand
+    slot = args.slot
+    if args.sequence == "prepare":
+        steps = [(DeviceCommand.PREPARE_RECIPE, slot)]
+        desc = f"brew: PREPARE_RECIPE slot {slot}"
+    else:  # select-prepare (default)
+        steps = [(DeviceCommand.SELECT_RECIPE, slot), (DeviceCommand.PREPARE_RECIPE, slot)]
+        desc = f"brew: SELECT_RECIPE + PREPARE_RECIPE slot {slot}"
+    return _actuate(cfg, args, steps, desc + "  [L] sequence/slot-base unverified")
+
+
+def cmd_send(cfg: Config, args) -> int:
+    # Raw hex escape hatch. Validate here so --dry-run can show it offline.
+    try:
+        bytes.fromhex(args.hex)
+    except ValueError:
+        raise SystemExit(f"--hex must be an even-length hex string, got {args.hex!r}")
+    payload = args.hex.lower()
+    if args.dry_run:
+        print(f"[dry-run] raw send — nothing sent\n  would publish: {payload!r}  ->  <thing>/host")
+        return 0
+    thing, pem, key = _device_for_connect(cfg, args.thing)
+    print(f"⚠️  This WILL actuate your physical Spinn ({thing}).")
+    print(f"   publish RAW: {payload!r} -> {thing}/host")
+    if not args.yes:
+        try:
+            if input("   Type YES to proceed: ").strip() != "YES":
+                print("Aborted — nothing sent."); return 1
+        except EOFError:
+            print("Aborted (no TTY; pass --yes to actuate non-interactively)."); return 1
+    from .commands import DeviceCommander
+    cmder = DeviceCommander(cfg.iot_endpoint, thing, pem, key)
+    cmder.connect()
+    try:
+        res = cmder.send_raw(payload)
+        print(f"   sent {res['payload']} | acks: {res['acks'] or '(none within timeout)'}")
+    finally:
+        cmder.disconnect()
+    return 0
+
+
+def _add_actuate_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--thing", help="thing_name, if you have more than one machine.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the hex that WOULD be sent; connect to nothing, actuate nothing.")
+    p.add_argument("--yes", action="store_true",
+                   help="Skip the interactive confirmation (for scripts). Still actuates!")
 
 
 # --------------------------------------------------------------------------
@@ -178,6 +301,32 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--watch", action="store_true", help="Stream live updates until Ctrl-C.")
     ps.add_argument("--raw", action="store_true", help="Also dump the full shadow JSON.")
     ps.set_defaults(func=cmd_state)
+
+    # --- actuating commands (opt-in; each gated by confirmation / --yes) ---
+    pw = sub.add_parser("power", help="[ACTUATES] Switch the machine on or off.")
+    pw.add_argument("state", choices=["on", "off"])
+    _add_actuate_flags(pw); pw.set_defaults(func=cmd_power)
+
+    pstart = sub.add_parser("start", help="[ACTUATES] Send START.")
+    _add_actuate_flags(pstart); pstart.set_defaults(func=cmd_start)
+
+    pstop = sub.add_parser("stop", help="[ACTUATES] Send STOP.")
+    _add_actuate_flags(pstop); pstop.set_defaults(func=cmd_stop)
+
+    pf = sub.add_parser("flush", help="[ACTUATES] Hopper flush.")
+    _add_actuate_flags(pf); pf.set_defaults(func=cmd_flush)
+
+    pb = sub.add_parser("brew", help="[ACTUATES] Brew a cookbook slot.")
+    pb.add_argument("--slot", type=int, required=True,
+                    help="Recipe/cookbook slot byte (0- vs 1-based is [L] unverified).")
+    pb.add_argument("--sequence", choices=["select-prepare", "prepare"], default="select-prepare",
+                    help="select-prepare (default): SELECT then PREPARE; prepare: PREPARE only.")
+    _add_actuate_flags(pb); pb.set_defaults(func=cmd_brew)
+
+    psend = sub.add_parser("send", help="[ACTUATES] Publish a raw hex payload to <thing>/host.")
+    psend.add_argument("--hex", required=True, help="Even-length hex string, e.g. 0602.")
+    _add_actuate_flags(psend); psend.set_defaults(func=cmd_send)
+
     return p
 
 
