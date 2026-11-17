@@ -4,6 +4,8 @@ Local, app-free control for the **Spinn** bean-to-cup coffee maker — so you ca
 state and brew from your own tools (e.g. [Home Assistant](https://www.home-assistant.io/))
 instead of the vendor's phone app.
 
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/spiegela)
+
 > **Status:** the **read path is live-verified** against a real machine — sign-in, device +
 > certificate fetch, AWS IoT mutual-TLS, and reading the device shadow all work
 > ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)). A **read-only** Python client is included. Writing
@@ -70,6 +72,13 @@ opt-in flag.
 
 Protocol recovered by static analysis of the official Android app for personal interoperability.
 Inspired by the community "Project Spunn" discussion, which stayed private.
+
+## Support
+
+If DizzyCoffee freed your Spinn from the app, a coffee is always appreciated — no pressure, the
+project stays free and open either way.
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/spiegela)
 
 ## License
 
