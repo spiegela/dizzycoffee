@@ -211,17 +211,22 @@ data:
   size_ml: 240
 ```
 
-### Install via HACS
+### Install
 
-1. In HACS → **⋮** → *Custom repositories*, add `https://github.com/spiegela/dizzycoffee`
-   with category **Integration**.
-2. Install **Spinn Coffee Maker**, then restart Home Assistant.
-3. **Settings → Devices & Services → Add Integration → Spinn**, and sign in with your Spinn
-   account. If the account has more than one machine, you'll be asked to pick one.
+**Home Assistant 2026.11 and later (Marketplace):**
+
+1. **Settings → Marketplace → Add from link**, enter `spiegela/dizzycoffee`, and choose type
+   **Integration** if asked. (Custom repositories need a one-time GitHub sign-in.)
+2. Install **Spinn Coffee Maker**. Setup starts straight away; sign in with your Spinn account,
+   and pick a machine if the account has more than one.
+
+**Older versions (HACS):** HACS → **⋮** → *Custom repositories*, add
+`https://github.com/spiegela/dizzycoffee` as an **Integration**, install **Spinn Coffee Maker**,
+restart, then **Settings → Devices & Services → Add Integration → Spinn**.
 
 > **Bundled client — nothing extra to install.** The integration ships a verbatim copy of the
 > `dizzycoffee` client under
-> [`custom_components/spinn/_vendor/`](custom_components/spinn/_vendor/), so HACS installs
+> [`custom_components/spinn/_vendor/`](custom_components/spinn/_vendor/), so Marketplace and HACS installs
 > (including Home Assistant OS) work out of the box; its dependencies (`awsiotsdk`, `certifi`,
 > `requests`) install automatically from the manifest. If a real `dizzycoffee` is already
 > importable in your HA environment (e.g. a development checkout) it is preferred, and the
@@ -318,10 +323,14 @@ type: custom:spinn-recipe-editor-card
 # confirm: true            # ask before Brew once
 ```
 
-Built-in `icon` names for favorites and recipe tiles: `ristretto`, `espresso`, `doppio`,
-`lungo`, `americano`, `coldbrew`, `coffee`, `cappuccino`, `latte`, `macchiato`, `water`,
-`pourover`, `carafe`, `mug`, `travelmug` (anything else falls back to a generic cup). Any
-entity can be overridden in YAML by its key (e.g. `beans: sensor.my_beans`).
+Every recipe is drawn as its own illustration (picked from the recipe's Spinn slug), with an
+accent colour behind each tile; in the editor the picture follows strength, size and pour order.
+To choose a drawing yourself, set `icon` on a favorite or recipe tile: `espresso`, `ristretto`,
+`espressoplus`, `doppio`, `lungo`, `americano`, `coffee`, `mug`, `xlbold`, `carafe`,
+`travelmug`, `tumbler`, `pourover`, `water`, `coldbrew`, `nitro`, `coldespresso`, `latte`,
+`vanillalatte`, `cappuccino`, `flatwhite`, `cortado`, `macchiato`, `mocha`, `affogato`,
+`barraquito`, `romano`, `martini`, `guillermo`, `holiday`, `icedcappuccino`, `moonlight`,
+`pumpkin`. Any entity can be overridden in YAML by its key (e.g. `beans: sensor.my_beans`).
 
 If you ever disable auto-registration, add the module manually as a dashboard resource:
 `/spinn_cards/spinn-card.js` (JavaScript module).
