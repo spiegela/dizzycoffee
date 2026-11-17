@@ -7,11 +7,12 @@ Everything below is **[C] Confirmed** from decompiled source / Retrofit annotati
 `@SerializedName`, unless tagged **[L] verify live** (a runtime assumption worth a smoke test).
 App package `com.spinn.spinncoffee`.
 
-> **[V] Live-verified 2026-11-17** against a real machine with the DizzyCoffee read-only client:
-> email/password auth, device + certificate fetch, ATS MQTT mutual-TLS, and the shadow read path
-> all work. Three corrections from that run are folded in below and tagged **[V]**:
-> (1) the usable cert is only on the single-device endpoint; (2) connect to the **ATS** IoT
-> endpoint, not the legacy one the app ships; (3) the real `reported` shadow key set.
+> **[V] Live-verified 2026-11-17** against a real machine with the DizzyCoffee client: email/password
+> auth, device + certificate fetch, ATS MQTT mutual-TLS, the shadow read path, **and a client-issued
+> brew** (`0505`+`0605` → the machine poured) all work. Corrections from that run are folded in below
+> and tagged **[V]**: (1) the usable cert is only on the single-device endpoint; (2) connect to the
+> **ATS** IoT endpoint, not the legacy one the app ships; (3) the real `reported` shadow key set;
+> (4) the brew sequence and slot-byte semantics (§5).
 
 ---
 
@@ -141,12 +142,17 @@ NotificationsFunctionsApi, RoasterFunctionsApi, MarketplaceFunctionsApi, IotWith
 
 Examples (payload is the literal ASCII hex):
 - Power on / off → `"01"` / `"02"` · Start / Stop brew → `"03"` / `"04"` · Hopper flush → `"11"`
-- **Brew cookbook slot 2:** `SELECT_RECIPE`+slot = `"0502"`, then `PREPARE_RECIPE`+slot = `"0602"`
-  (exact select-then-prepare vs prepare-alone sequence = **[L]**; slot numbering from `recipe/api/cookbook`).
+- **[V] Brew recipe slot 5** (verified live): publish `SELECT_RECIPE`+slot `"0505"`, then
+  `PREPARE_RECIPE`+slot `"0605"` → the machine enters `MachineStatus=PREPAREDRINK` and pours. The
+  select-then-prepare sequence works, and **the slot byte equals the shadow's `RecipeNumber`** value
+  (slot 5 ↔ `RecipeNumber="5"`), so it is not an extra-offset index. `RecipeNumber` indexes the
+  shadow `recipes` array (§6).
 
-**Acks/events:** machine publishes JSON back (on `host`/`bridge`/`log`), parsed as
-`DeviceError { code, description, state, type, value }`; command events have `type` starting `"host"`,
-firmware-update events `"ota_state"`.
+**[V] Host echo / acks.** Publishing to `<thing>/host` while subscribed to it returns your own
+message back first (MQTT self-delivery) — e.g. publishing `"0505"` yields a `"0505"` message. Any
+genuine machine event (`DeviceError { code, description, state, type, value }`; `type` starting
+`"host"`, firmware events `"ota_state"`) would follow that echo; none was emitted for a normal brew
+within a few seconds. Collect the whole window, not just the first message, to separate echo from acks.
 
 ---
 
@@ -165,8 +171,14 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
   REMOVED` — note **`LEVEL0`** (seen live) was not in the decompiled enum. `WaterLineStatus` e.g.
   `WL_CONNECTED`.
 - **State:** `MachineStatus` `{READY, ACTIVE, STANDBY, CLEANING, EXPELL, PREPAREDRINK, MACHINEERROR,
-  RECOVERING, RECOVERY, SPECIALTASK, INACTIVE, UNDEFINED}`; `ProcessStatus` `{…, UNDEFINED}`;
-  `ResetReason` e.g. `POWERON`.
+  RECOVERING, RECOVERY, SPECIALTASK, INACTIVE, UNDEFINED}`; `ResetReason` e.g. `POWERON`.
+  **[V] Brew lifecycle (observed live):** idle is `MachineStatus=INACTIVE` (asleep) or `ACTIVE`
+  (awake) with `ProcessStatus=UNDEFINED`; during a brew `MachineStatus=PREPAREDRINK` and
+  `ProcessStatus` steps through **`WAITFORBREWERFILLSPEED` → `WAITFOREXTRACTIONTIME`** (neither value
+  is in the decompiled `ProcessStatuses` enum, which only had the `WAITFOR…` set in §5's source).
+  During the pour `WaterVolume` falls, and `GrinderUserCounter`/`FilterCounter`/`DripTrayCapacity`/
+  `ResidueBinCapacity` move; **no component-status keys appear** (they stayed absent at 28 keys even
+  mid-brew, so `BrewerStatus` et al. are app-derived, not on the wire).
 - **Brew bookkeeping:** `RecipeNumber`, `ShotCount`, `ColdbrewCounter`, `CoffeeCountersTtl`,
   `GrinderMasterCounter`, `GrinderUserCounter`, `FilterCounter`, `NoDeepCleanCounter`,
   `NoDescaleCounter`.
@@ -188,23 +200,25 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
 
 ## 7. Verify-live checklist (small smoke test, [L] items)
 
-1. ~~`Authorization: Bearer <access_token>` header shape~~ — **[V] confirmed.**
-2. Exact brew sequence: `SELECT_RECIPE` then `PREPARE_RECIPE`, or `PREPARE_RECIPE` alone; and the ack shape. **[L]**
-3. Cookbook slot ↔ recipe mapping and whether the slot byte is 0- or 1-based — the shadow `recipes`
-   array and `RecipeNumber` are the likely source (§6); confirm the byte base against a brew. **[L]**
-4. ~~Exact reported-shadow JSON envelope~~ — **[V] confirmed** (`state.reported`, all string values; §6).
-5. Component/active-brew shadow keys — only observable while the machine runs. **[L]**
+1. ~~`Authorization: Bearer` header shape~~ — **[V] confirmed.**
+2. ~~Brew sequence~~ — **[V] confirmed:** `SELECT_RECIPE`+slot then `PREPARE_RECIPE`+slot pours (§5).
+3. ~~Slot byte base~~ — **[V] confirmed:** the slot byte equals the shadow `RecipeNumber` value (§5).
+4. ~~Reported-shadow JSON envelope~~ — **[V] confirmed** (`state.reported`, all string values; §6).
+5. ~~Active-brew shadow keys~~ — **[V] confirmed:** same 28 keys, no component statuses; `MachineStatus`/
+   `ProcessStatus`/counters move (§6).
 
-Only the brew-side items remain; the entire read path is live-verified. They need one brew with you present.
+**Every item is now live-verified.** Remaining nice-to-haves: the exact machine ack/event JSON (none
+seen for a normal brew beyond the self-echo), and `STOP`/`power`/`flush` behaviour (opcodes confirmed,
+effects not individually exercised).
 
 ---
 
 ## 8. Feasibility
 
-- **Tier 1 (app-free via Spinn cloud): [V] read path live-verified.** auth → `GET
-  link/api/devices/{thing}` (thing + cert) → ATS MQTT mutual-TLS → read shadow — all working end to
-  end. Publishing hex to `host` is specified but unexercised ([L]). **The read-only client in this
-  repo implements Tier 1 up to (but not including) publishing to `host`.**
+- **Tier 1 (app-free via Spinn cloud): [V] fully live-verified, read *and* write.** auth → `GET
+  link/api/devices/{thing}` (thing + cert) → ATS MQTT mutual-TLS → read shadow *and* publish a brew to
+  `<thing>/host` — all working end to end against a real machine. The DizzyCoffee client implements
+  the whole of Tier 1; command publishing is confirmation-gated.
 - **Tier 2 (no cloud): gated on one untested fact** — whether the machine's own TLS link to the ATS
   endpoint validates/pins the server cert+hostname. If not, redirect it (LAN DNS → local broker emulating
   the `$aws/things/…/shadow/…` + `<thing>/host` topics). No local path exists in firmware for normal use.

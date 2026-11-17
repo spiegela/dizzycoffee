@@ -6,11 +6,10 @@ instead of the vendor's phone app.
 
 [![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/spiegela)
 
-> **Status:** the **read path is live-verified** against a real machine — sign-in, device +
-> certificate fetch, AWS IoT mutual-TLS, and reading the device shadow all work
-> ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)). Commands (brew/start/stop/…) are implemented but
-> **confirmation-gated and not yet verified on hardware** — use `--dry-run` to see exactly what
-> would be sent, and expect to confirm the brew sequence / slot numbering on your own machine.
+> **Status:** **live-verified end to end** against a real machine — sign-in, device + certificate
+> fetch, AWS IoT mutual-TLS, reading the shadow, **and brewing** (a client-issued `SELECT`+`PREPARE`
+> made the machine pour) all work ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)). Commands are
+> confirmation-gated; use `--dry-run` to preview the exact bytes.
 
 ## What this is
 
@@ -86,10 +85,10 @@ uv run python -m dizzycoffee flush            # hopper flush
 uv run python -m dizzycoffee send --hex 0602  # raw escape hatch
 ```
 
-> **Unverified bits.** The opcode table is confirmed from the app, but the exact brew sequence
-> (`brew` defaults to `SELECT_RECIPE` then `PREPARE_RECIPE`; try `--sequence prepare` for
-> `PREPARE_RECIPE` alone) and whether the `--slot` byte is 0- or 1-based still need confirming on a
-> real machine. See the `[L]` items in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+> **Verified:** `brew` (`SELECT_RECIPE` then `PREPARE_RECIPE`) pours, and `--slot N` maps to the
+> shadow's `RecipeNumber N`. `--sequence prepare` sends `PREPARE_RECIPE` alone if you want to try it.
+> `power`/`start`/`stop`/`flush` opcodes are confirmed from the app but their individual effects
+> aren't separately exercised yet. Details in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
 ## Credits
 

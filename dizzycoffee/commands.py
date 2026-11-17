@@ -89,21 +89,30 @@ class DeviceCommander:
         assert self._conn is not None, "call connect() first"
         acks: "queue.Queue[dict]" = queue.Queue()
         if await_ack:
-            def _on_ack(topic, msg, **_kw):
+            def _on_ack(topic, payload, **_kw):
                 try:
-                    acks.put(json.loads(msg.decode() or "{}"))
+                    acks.put(json.loads(payload.decode() or "{}"))
                 except Exception:
-                    acks.put({"_raw": msg.decode(errors="replace")})
+                    acks.put({"_raw": payload.decode(errors="replace")})
             self._conn.subscribe(self._topic, QOS1, _on_ack)[0].result(10)
 
         self._conn.publish(self._topic, payload.encode(), QOS1)[0].result(10)
 
+        # Collect everything the host topic emits in the window. The first message
+        # is usually the broker echoing our own publish back (we're subscribed to
+        # the same topic); genuine machine events/acks, if any, follow.
         collected = []
         if await_ack:
-            try:
-                collected.append(acks.get(timeout=await_ack))
-            except queue.Empty:
-                pass
+            import time
+            deadline = time.monotonic() + await_ack
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    collected.append(acks.get(timeout=remaining))
+                except queue.Empty:
+                    break
         return {"payload": payload, "acks": collected}
 
     def send(self, cmd: DeviceCommand, param: Optional[int] = None,
