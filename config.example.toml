@@ -1,0 +1,12 @@
+# Copy to ~/.config/dizzycoffee/config.toml (NOT into this repo) and edit, or
+# set the matching DIZZY_* environment variables. Everything here is optional;
+# the defaults are the values the official app ships with.
+#
+# Your password is NEVER read from here — `login` prompts for it and sends it
+# straight to Spinn over HTTPS. Only the resulting session token is stored
+# locally (in ~/.config/dizzycoffee/session.json, chmod 600).
+
+# email    = "you@example.com"        # convenience default for `login`
+# mp_base      = "https://www.spinn.com/api/"
+# iot_base     = "https://iot.spinn.com/"
+# iot_endpoint = "a1gzieuy3t1932.iot.us-east-1.amazonaws.com"
