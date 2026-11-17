@@ -130,8 +130,55 @@ from `GET link/api/devices/{thing}` on each refresh cycle, never written to disk
 > [`_vendor/` README](custom_components/spinn/_vendor/README.md) for how to re-sync the copy
 > after changing the client.
 
-> Publishing to `<thing>/host` **actuates the machine**. The Brew/Start/Stop/Flush buttons do
-> exactly that — treat them like pressing the machine's own buttons.
+### Dashboard cards
+
+The integration ships two theme-aware Lovelace cards (in
+[`custom_components/spinn/frontend/`](custom_components/spinn/frontend/)) and **registers
+them automatically** — no manual resource step. After setup, edit a dashboard → **Add card**
+→ search "Spinn":
+
+- **Spinn Machine** (`custom:spinn-machine-card`) — an illustrated machine that reflects
+  status (idle / brewing / error / offline), beans / water / grounds / drip-tray levels, and
+  shot count, with **Brew now / Start / Stop / Hopper flush** buttons and quick-brew favorite
+  chips.
+- **Spinn Recipes** (`custom:spinn-recipe-card`) — a recipe browser; tap a recipe to brew its
+  cookbook slot (it sets the recipe-slot selector, then presses Brew).
+
+Entities are auto-detected from the first Spinn device; override any of them in YAML. Example:
+
+```yaml
+type: custom:spinn-machine-card
+name: Kitchen Spinn          # optional label
+# prefix: shenzhou           # entity slug if auto-detect guesses wrong
+# confirm: true              # ask before each brew (default: false)
+favorites:
+  - { slot: 2, name: Espresso, icon: espresso }
+  - { slot: 5, name: Americano, icon: americano }
+  - { slot: 6, name: Cold Brew, icon: coldbrew }
+```
+
+```yaml
+type: custom:spinn-recipe-card
+title: Recipes
+recipes:
+  - { slot: 1, name: Ristretto, icon: ristretto, volume: 40 }
+  - { slot: 2, name: Espresso,  icon: espresso,  volume: 60 }
+  - { slot: 3, name: Doppio,    icon: doppio,    volume: 155 }
+  - { slot: 4, name: Lungo,     icon: lungo,     volume: 85 }
+  - { slot: 5, name: Americano, icon: americano, volume: 120 }
+  - { slot: 6, name: Cold Brew, icon: coldbrew,  volume: 200 }
+```
+
+`slot` is the cookbook/recipe number on your machine (the brew slot byte equals the shadow's
+`RecipeNumber`); set the slots/names to match **your** cookbook. Built-in `icon` names:
+`ristretto`, `espresso`, `doppio`, `lungo`, `americano`, `coldbrew`, `coffee`, `cappuccino`,
+`latte`, `macchiato`, `water` (anything else falls back to a generic cup).
+
+If you ever disable auto-registration, add the module manually as a dashboard resource:
+`/spinn_cards/spinn-card.js` (JavaScript module).
+
+> Publishing to `<thing>/host` **actuates the machine**. The Brew/Start/Stop/Flush buttons and
+> the recipe tiles do exactly that — treat them like pressing the machine's own buttons.
 
 ## Credits
 
