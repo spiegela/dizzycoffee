@@ -120,13 +120,15 @@ from `GET link/api/devices/{thing}` on each refresh cycle, never written to disk
 3. **Settings → Devices & Services → Add Integration → Spinn**, and sign in with your Spinn
    account. If the account has more than one machine, you'll be asked to pick one.
 
-> **Library requirement.** The integration imports the `dizzycoffee` package (the client in
-> this repo). Its own dependencies (`awsiotsdk`, `certifi`, `requests`) install automatically
-> from the manifest, but `dizzycoffee` itself must also be importable by Home Assistant. Until
-> it's published to PyPI (so it can be added to the manifest `requirements` for a one-click
-> install), make it available in your HA Python environment — e.g. on a container/Core install
-> `pip install git+https://github.com/spiegela/dizzycoffee`, or vendor the package. On Home
-> Assistant OS, publishing to PyPI + adding it to `requirements` is the supported path.
+> **Bundled client — nothing extra to install.** The integration ships a verbatim copy of the
+> `dizzycoffee` client under
+> [`custom_components/spinn/_vendor/`](custom_components/spinn/_vendor/), so HACS installs
+> (including Home Assistant OS) work out of the box; its dependencies (`awsiotsdk`, `certifi`,
+> `requests`) install automatically from the manifest. If a real `dizzycoffee` is already
+> importable in your HA environment (e.g. a development checkout) it is preferred, and the
+> bundled copy is used only as a fallback. See the
+> [`_vendor/` README](custom_components/spinn/_vendor/README.md) for how to re-sync the copy
+> after changing the client.
 
 > Publishing to `<thing>/host` **actuates the machine**. The Brew/Start/Stop/Flush buttons do
 > exactly that — treat them like pressing the machine's own buttons.
