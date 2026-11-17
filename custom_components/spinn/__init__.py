@@ -12,7 +12,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, PLATFORMS
-from .coordinator import SpinnCoordinator
+from .vendor import ensure_dizzycoffee
+
+# Make the bundled `dizzycoffee` client importable before anything uses it.
+# Importing a submodule (e.g. config_flow) imports this package first, so this
+# runs ahead of every lazy `import dizzycoffee` in the integration.
+ensure_dizzycoffee()
+
+from .coordinator import SpinnCoordinator  # noqa: E402  (after ensure_dizzycoffee)
 
 _LOGGER = logging.getLogger(__name__)
 
