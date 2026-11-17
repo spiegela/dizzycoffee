@@ -14,7 +14,8 @@ dependencies = [
 dizzy = "dizzycoffee.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/"
+Homepage = "https://github.com/spiegela/dizzycoffee"
+Repository = "https://github.com/spiegela/dizzycoffee"
 
 [build-system]
 requires = ["hatchling"]

@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-USER_AGENT = "DizzyCoffee/0.1 (+https://github.com/)"  # generic; no personal data
+USER_AGENT = "DizzyCoffee/0.1 (+https://github.com/spiegela/dizzycoffee)"
 TIMEOUT = 20
 
 
