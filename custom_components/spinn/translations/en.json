@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Spinn account",
+        "description": "Sign in with your Spinn account. Your password is sent only to Spinn to obtain a session token; it is never stored by Home Assistant.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "select_device": {
+        "title": "Choose your machine",
+        "data": {
+          "thing_name": "Machine"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "Your Spinn session expired. Enter the password for {email} to sign in again.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Could not reach Spinn. Check your connection and try again.",
+      "library_missing": "The 'dizzycoffee' library is not installed in the Home Assistant environment."
+    },
+    "abort": {
+      "already_configured": "This machine is already configured.",
+      "no_devices": "No Spinn machines were found on this account.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Machine status" },
+      "process_status": { "name": "Process status" },
+      "beans": { "name": "Beans" },
+      "water_tank": { "name": "Water tank" },
+      "water_volume": { "name": "Water volume" },
+      "water_line_status": { "name": "Water line status" },
+      "grounds_bin": { "name": "Grounds bin" },
+      "grounds_bin_capacity": { "name": "Grounds bin capacity" },
+      "drip_tray": { "name": "Drip tray" },
+      "drip_tray_capacity": { "name": "Drip tray capacity" },
+      "recipe_number": { "name": "Recipe number" },
+      "shot_count": { "name": "Shot count" },
+      "grinder_user_counter": { "name": "Grinder user counter" },
+      "grinder_master_counter": { "name": "Grinder master counter" },
+      "filter_counter": { "name": "Filter counter" },
+      "no_deep_clean_counter": { "name": "Cups since deep clean" },
+      "no_descale_counter": { "name": "Cups since descale" },
+      "coldbrew_counter": { "name": "Cold brew counter" },
+      "wifi_rssi": { "name": "Wi-Fi signal" },
+      "air_pressure": { "name": "Air pressure" }
+    },
+    "binary_sensor": {
+      "connected": { "name": "Connected" },
+      "brewing": { "name": "Brewing" },
+      "error": { "name": "Error" }
+    },
+    "button": {
+      "brew": { "name": "Brew" },
+      "start": { "name": "Start" },
+      "stop": { "name": "Stop" },
+      "hopper_flush": { "name": "Hopper flush" }
+    },
+    "select": {
+      "recipe_slot": { "name": "Recipe slot" }
+    }
+  }
+}
