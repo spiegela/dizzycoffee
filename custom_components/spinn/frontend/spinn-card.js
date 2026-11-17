@@ -58,97 +58,410 @@ const TONE_COLOR = {
   error: "var(--error-color, #e53935)",
 };
 
-/* ------------------------------------------------------------- recipe icons */
-// Compact 48x48 glyphs. `currentColor` = outline (inherits text color);
-// coffee/crema use theme-independent coffee tones so drinks read on any bg.
+/* ------------------------------------------------------------ drink artwork */
+// Every recipe gets its own illustration, drawn in a 64x64 three-quarter view so
+// the drink's surface (crema, latte art, garnish) shows. Outlines use
+// currentColor so they follow the theme; liquids and ceramics use fixed tones
+// that read on light and dark. One renderer draws 20px chips, 44px tiles and the
+// editor's big preview, where strength / size / pour order drive the picture.
 const COFFEE = "#7b5333";
 const CREMA = "#c69c6d";
+const K = 0.3; // ellipse ry/rx: how far we look down into the cup
+let _artUid = 0;
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const r1 = (n) => Math.round(n * 10) / 10;
 
-function cup({ bodyW = 22, fill = 0.55, crema = false, foam = false, tall = false }) {
-  const x = (48 - bodyW) / 2;
-  const top = tall ? 8 : 16;
-  const bot = 38;
-  const h = bot - top;
-  const fillTop = bot - Math.max(0, Math.min(1, fill)) * (h - 3);
-  const handle = tall ? "" :
-    `<path d="M${x + bodyW} ${top + 4} q7 0 7 7 t-7 7" fill="none" stroke="currentColor" stroke-width="2.4"/>`;
-  const cremaLine = crema
-    ? `<rect x="${x + 2}" y="${fillTop - 2}" width="${bodyW - 4}" height="2.6" rx="1.3" fill="${CREMA}"/>`
-    : "";
-  const foamDome = foam
-    ? `<path d="M${x + 1} ${top + 1} q${bodyW / 2} -9 ${bodyW - 2} 0 Z" fill="var(--spinn-foam, #f3ece2)" stroke="currentColor" stroke-width="1.4"/>`
-    : "";
-  return `
-    <rect x="${x + 2}" y="${fillTop}" width="${bodyW - 4}" height="${bot - fillTop - 2}" rx="2.5" fill="${COFFEE}"/>
-    ${cremaLine}
-    <path d="M${x} ${top} h${bodyW} v${h - 6} q0 6 -6 6 h-${bodyW - 12} q-6 0 -6 -6 Z"
-          fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
-    ${handle}${foamDome}
-    <rect x="${x - 4}" y="${bot + 1}" width="${bodyW + 8}" height="2.6" rx="1.3" fill="currentColor" opacity=".55"/>`;
+function mixColor(a, b, t) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * clamp01(t)).toString(16).padStart(2, "0")).join("");
 }
 
-function glassColdbrew() {
-  return `
-    <path d="M17 10 h14 l-2 28 q-.4 2 -5 2 t-5 -2 Z" fill="${COFFEE}" opacity=".9"/>
-    <path d="M17 10 h14 l-2 28 q-.4 2 -5 2 t-5 -2 Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
-    <rect x="19" y="14" width="6" height="6" rx="1.3" fill="#fff" opacity=".7"/>
-    <rect x="25" y="20" width="6" height="6" rx="1.3" fill="#fff" opacity=".55"/>
-    <rect x="28" y="4" width="2.6" height="20" rx="1.3" fill="currentColor" transform="rotate(12 29 14)"/>`;
-}
-
-function steam() {
-  return `
-    <g class="rx-steam" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".5">
-      <path d="M21 12 q-3 -4 0 -8"/><path d="M27 12 q3 -4 0 -8"/>
-    </g>`;
-}
-
-const RECIPE_ICONS = {
-  ristretto: () => cup({ bodyW: 16, fill: 0.4, crema: true }),
-  espresso: () => cup({ bodyW: 20, fill: 0.55, crema: true }),
-  doppio: () => cup({ bodyW: 28, fill: 0.6, crema: true }),
-  lungo: () => cup({ bodyW: 20, fill: 0.8, tall: true }),
-  americano: () => cup({ bodyW: 24, fill: 0.78, tall: true }),
-  coldbrew: () => glassColdbrew(),
-  coffee: () => cup({ bodyW: 26, fill: 0.78, tall: true }),
-  cappuccino: () => cup({ bodyW: 24, fill: 0.5, foam: true }),
-  latte: () => cup({ bodyW: 20, fill: 0.72, foam: true, tall: true }),
-  macchiato: () => cup({ bodyW: 18, fill: 0.5, foam: true }),
-  water: () => cup({ bodyW: 22, fill: 0.7 }) + steam(),
-  pourover: () => `
-    <path d="M13 7 h22 l-7 11 h-8 Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
-    <rect x="22.7" y="18.5" width="2.6" height="5" rx="1.2" fill="${COFFEE}"/>
-    <rect x="15" y="28" width="18" height="8.5" rx="2" fill="${COFFEE}"/>
-    <path d="M13 23 h22 v9.5 q0 6 -6 6 h-10 q-6 0 -6 -6 Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
-    <rect x="9" y="40" width="30" height="2.6" rx="1.3" fill="currentColor" opacity=".55"/>`,
-  carafe: () => `
-    <path d="M12.6 29 h22.8 q.6 1.4 .6 2.6 q0 7.4 -7.4 7.4 h-9.2 q-7.4 0 -7.4 -7.4 q0 -1.2 .6 -2.6 Z" fill="${COFFEE}"/>
-    <path d="M17 7 h14 v4.5 l-2 2.5 q8 5 8 17 q0 9 -8.5 9 h-9 q-8.5 0 -8.5 -9 q0 -12 8 -17 l-2 -2.5 Z"
-          fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round"/>
-    <path d="M31 9 q8 1 7 11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`,
-  mug: () => `
-    <rect x="13" y="16" width="18" height="20.5" rx="2.5" fill="${COFFEE}"/>
-    <path d="M11 10 h22 v24 q0 5 -5 5 h-12 q-5 0 -5 -5 Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
-    <path d="M33 15 h3 q5 0 5 6 t-5 6 h-3" fill="none" stroke="currentColor" stroke-width="2.4"/>`,
-  travelmug: () => `
-    <path d="M16.5 15 h15 l-1.8 23 q-.2 2 -2.2 2 h-7 q-2 0 -2.2 -2 Z" fill="${COFFEE}" opacity=".9"/>
-    <path d="M15 13 h18 l-2 25 q-.2 2.5 -2.7 2.5 h-8.6 q-2.5 0 -2.7 -2.5 Z" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round"/>
-    <rect x="13" y="7" width="22" height="6" rx="2.2" fill="currentColor"/>
-    <rect x="15.6" y="22" width="16.8" height="7" rx="1" fill="currentColor" opacity=".35"/>`,
-  default: () => cup({ bodyW: 22, fill: 0.55, crema: true }),
+const INK = {
+  milk: "#f1e5d1", foam: "#fbf6ee", latte: "#c39467", cream: "#fffaf1", choc: "#3b1a0e",
+  lemon: "#f2cf3a", lime: "#7cb83a", licor: "#dca234", condensed: "#f3e6c4", cinnamon: "#9a4f24",
 };
+const espresso = (t) => mixColor("#7a4420", "#1a0a03", 0.1 + 0.85 * clamp01(t));
+const brewed = (t) => mixColor("#9a6435", "#2b1508", 0.1 + 0.85 * clamp01(t));
 
-// Pick an icon for a recipe from an explicit icon, else its slug / name.
+// Smooth path through points (Catmull-Rom as cubic Béziers), without the leading M.
+function smoothThrough(p) {
+  let d = "";
+  for (let i = 0; i < p.length - 1; i++) {
+    const p0 = p[i - 1] || p[i], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p2;
+    d += ` C${r1(p1[0] + (p2[0] - p0[0]) / 6)} ${r1(p1[1] + (p2[1] - p0[1]) / 6)} ${r1(p2[0] - (p3[0] - p1[0]) / 6)} ${r1(p2[1] - (p3[1] - p1[1]) / 6)} ${r1(p2[0])} ${r1(p2[1])}`;
+  }
+  return d;
+}
+
+// A round vessel from its profile: [[y, radius], ...] top to bottom.
+function vessel(pts, cx) {
+  const top = pts[0][0], bot = pts[pts.length - 1][0], rB = pts[pts.length - 1][1];
+  const rxAt = (y) => {
+    if (y <= top) return pts[0][1];
+    for (let i = 1; i < pts.length; i++) {
+      const [ya, ra] = pts[i - 1], [yb, rb] = pts[i];
+      if (y <= yb) return ra + (rb - ra) * ((y - ya) / (yb - ya));
+    }
+    return rB;
+  };
+  const left = pts.map(([y, r]) => [cx - r, y]);
+  const right = pts.map(([y, r]) => [cx + r, y]).reverse();
+  const d = `M${r1(cx - pts[0][1])} ${top}${smoothThrough(left)} A${rB} ${r1(rB * K)} 0 0 0 ${r1(cx + rB)} ${bot}${smoothThrough(right)} Z`;
+  return { top, bot, rT: pts[0][1], rB, rMax: Math.max(...pts.map((p) => p[1])), rxAt, d };
+}
+const liquidY = (pts, fill) => pts[pts.length - 1][0] - (pts[pts.length - 1][0] - pts[0][0]) * clamp01(fill);
+
+function artDefs(u, t) {
+  return `<defs>
+    <linearGradient id="${u}sh" x1="0" x2="1"><stop offset="0" stop-color="#000" stop-opacity=".3"/><stop offset=".3" stop-color="#000" stop-opacity="0"/><stop offset=".62" stop-color="#fff" stop-opacity=".12"/><stop offset="1" stop-color="#000" stop-opacity=".34"/></linearGradient>
+    <radialGradient id="${u}cr" cx=".42" cy=".38" r=".72"><stop offset="0" stop-color="${mixColor("#f3cd98", "#b9783f", t)}"/><stop offset=".6" stop-color="${mixColor("#d49a5a", "#8f5326", t)}"/><stop offset="1" stop-color="${mixColor("#a8662f", "#4e280f", t)}"/></radialGradient>
+    <radialGradient id="${u}fo" cx=".45" cy=".38" r=".75"><stop offset="0" stop-color="#fffdf9"/><stop offset="1" stop-color="#e6d9c4"/></radialGradient>
+    <linearGradient id="${u}sa" x1="0" x2="1"><stop offset="0" stop-color="#d9d2c7"/><stop offset=".4" stop-color="#fbfaf7"/><stop offset="1" stop-color="#c9c0b3"/></linearGradient>
+    <linearGradient id="${u}ci" y1="0" y2="1"><stop offset="0" stop-color="#a9a093"/><stop offset="1" stop-color="#f4f0ea"/></linearGradient>
+    <radialGradient id="${u}ic" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#fffdf6"/><stop offset=".7" stop-color="#f6ead2"/><stop offset="1" stop-color="#e2cfae"/></radialGradient>
+  </defs>`;
+}
+
+/* ---- surfaces: what you see looking into the cup */
+const ART = {
+  heart: `<path d="M0 6 C-8.5 0 -8 -7.5 -2.6 -6.4 C-1 -6 0 -4.8 0 -3.6 C0 -4.8 1 -6 2.6 -6.4 C8 -7.5 8.5 0 0 6 Z"/>`,
+  rosetta: [0, 1, 2, 3, 4].map((i) => `<path d="M${-6.8 + i * 1.2} ${-5.8 + i * 2.6} Q0 ${-2 + i * 2.6} ${6.8 - i * 1.2} ${-5.8 + i * 2.6}" fill="none" stroke-width="2.6" stroke-linecap="round"/>`).join("") +
+    `<path d="M0 -7.5 L0 8" fill="none" stroke-width="1.2"/>`,
+  tulip: `<ellipse cx="0" cy="-4.6" rx="3.6" ry="2.6"/><ellipse cx="0" cy="-.2" rx="5" ry="3"/><ellipse cx="0" cy="4.6" rx="6.4" ry="3.2"/><path d="M0 -7 L0 8" fill="none" stroke-width="1"/>`,
+  dot: `<circle cx="0" cy="0" r="3.6"/>`,
+};
+const DUST = [[-.5, .1], [.2, -.4], [.6, .2], [-.2, .5], [.1, .1], [-.7, -.2], [.45, -.1], [-.35, -.45], [.3, .55], [-.6, .4], [.75, -.3], [0, -.7], [-.1, -.15], [.55, .45]];
+const SPOTS = [[-.38, .12, .2], [.32, -.22, .15], [.12, .4, .12], [-.1, -.38, .1], [.55, .22, .09], [-.6, -.15, .08]];
+
+function surface(cx, y, rx, u, s = {}) {
+  const ry = rx * K;
+  const fill = s.fill === "crema" || !s.fill ? `url(#${u}cr)` : s.fill === "foam" ? `url(#${u}fo)` : s.fill;
+  let o = `<ellipse cx="${r1(cx)}" cy="${r1(y)}" rx="${r1(rx)}" ry="${r1(ry)}" fill="${fill}"/>`;
+  if (s.spots || (!s.fill || s.fill === "crema") && s.spots !== false) {
+    o += SPOTS.map(([x, yy, r]) => `<ellipse cx="${r1(cx + x * rx)}" cy="${r1(y + yy * ry)}" rx="${r1(r * rx)}" ry="${r1(r * rx * K)}" fill="#6a3814" opacity=".3"/>`).join("");
+  }
+  if (s.art) o += `<g transform="translate(${r1(cx)} ${r1(y)}) scale(${r1(rx / 10 * 100) / 100} ${r1(ry / 10 * 100) / 100})" fill="${s.artColor}" stroke="${s.artColor}">${ART[s.art]}</g>`;
+  if (s.dust) o += DUST.map(([x, yy]) => `<circle cx="${r1(cx + x * rx * .85)}" cy="${r1(y + yy * ry * .85)}" r="${r1(Math.max(.45, rx * .05))}" fill="${s.dust}" opacity=".85"/>`).join("");
+  if (s.sheen) o += `<ellipse cx="${r1(cx - rx * .28)}" cy="${r1(y - ry * .25)}" rx="${r1(rx * .42)}" ry="${r1(ry * .32)}" fill="#fff" opacity=".18"/>`;
+  return o;
+}
+
+/* ---- vessels */
+function glassArt(u, o) {
+  const cx = o.cx ?? 32, V = vessel(o.pts, cx), id = `${u}g${o.k || ""}`;
+  const { top, bot, rB, rxAt } = V;
+  const liq = liquidY(o.pts, o.fill ?? 0.8);
+  const floorY = bot + rB * K;
+  let col = "";
+  const layers = o.layers || [];
+  if (layers.length) {
+    const tot = layers.reduce((s, l) => s + l.f, 0), H = floorY - liq, tops = [];
+    let y = floorY;
+    for (const l of layers) { y -= (l.f / tot) * H; tops.push(y); }
+    // paint the top layer first; each lower layer covers from its front arc down
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const yt = tops[i], r = rxAt(yt) + 3;
+      col += `<path d="M${r1(cx - r)} ${r1(yt)} A${r1(r)} ${r1(r * K)} 0 0 0 ${r1(cx + r)} ${r1(yt)} V${bot + 30} H${r1(cx - r)} Z" fill="${layers[i].c}"/>`;
+    }
+    col += surface(cx, liq, rxAt(liq), u, o.surface || { fill: layers[layers.length - 1].c });
+  }
+  const hl = [];
+  for (let i = 0; i <= 6; i++) { const y = top + 3 + (bot - top) * 0.6 * (i / 6); hl.push(`${r1(cx - rxAt(y) + 2.3)} ${r1(y)}`); }
+  const base = o.base ? `<path d="M${r1(cx - rB)} ${bot} V${bot + 2.4} A${rB} ${r1(rB * K)} 0 0 0 ${r1(cx + rB)} ${bot + 2.4} V${bot}" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-opacity=".6" stroke-width="1.2"/>` : "";
+  return `
+    ${o.back || ""}
+    <clipPath id="${id}"><path d="${V.d}"/></clipPath>
+    ${base}
+    <path d="${V.d}" fill="currentColor" fill-opacity=".07"/>
+    <ellipse cx="${cx}" cy="${top}" rx="${V.rT}" ry="${r1(V.rT * K)}" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".32" stroke-width="1.1"/>
+    <g clip-path="url(#${id})">${col}${o.inside || ""}
+      <rect x="${r1(cx - V.rMax)}" y="${top - 12}" width="${r1(2 * V.rMax)}" height="${bot - top + 30}" fill="url(#${u}sh)"/></g>
+    <path d="${V.d}" fill="none" stroke="currentColor" stroke-opacity=".72" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M${r1(cx - V.rT)} ${top} A${V.rT} ${r1(V.rT * K)} 0 0 0 ${r1(cx + V.rT)} ${top}" fill="none" stroke="currentColor" stroke-opacity=".8" stroke-width="1.4"/>
+    <path d="M${hl.join(" L")}" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="1.5" stroke-linecap="round"/>
+    ${o.over || ""}`;
+}
+
+function saucerArt(u, cx, y, r) {
+  return `
+    <ellipse cx="${cx}" cy="${r1(y + 2.4)}" rx="${r1(r * .92)}" ry="${r1(r * K * .8)}" fill="currentColor" opacity=".13"/>
+    <ellipse cx="${cx}" cy="${y}" rx="${r1(r)}" ry="${r1(r * K)}" fill="url(#${u}sa)" stroke="currentColor" stroke-opacity=".35" stroke-width="1.1"/>
+    <ellipse cx="${cx}" cy="${r1(y - .5)}" rx="${r1(r * .6)}" ry="${r1(r * .6 * K)}" fill="none" stroke="#000" stroke-opacity=".1" stroke-width="1"/>`;
+}
+
+function cupArt(u, o) {
+  const cx = o.cx ?? 30, { top, rx, depth } = o, ry = rx * K, b = top + depth;
+  const mug = o.shape === "mug", foot = o.foot ?? (mug ? rx - 0.8 : rx * 0.55);
+  const color = o.color || "#f3eee6", lt = mixColor(color, "#ffffff", 0.6), dk = mixColor(color, "#000000", 0.3);
+  const ce = `${u}ce${o.k || ""}`, rim = `${u}rm${o.k || ""}`;
+  const body = mug
+    ? `M${cx - rx} ${top} L${r1(cx - foot)} ${b} A${r1(foot)} ${r1(foot * K)} 0 0 0 ${r1(cx + foot)} ${b} L${cx + rx} ${top} A${rx} ${r1(ry)} 0 0 1 ${cx - rx} ${top} Z`
+    : `M${cx - rx} ${top} C${cx - rx} ${r1(top + depth * .78)} ${r1(cx - foot - 3)} ${b} ${r1(cx - foot)} ${b} L${r1(cx + foot)} ${b} C${r1(cx + foot + 3)} ${b} ${cx + rx} ${r1(top + depth * .78)} ${cx + rx} ${top} A${rx} ${r1(ry)} 0 0 1 ${cx - rx} ${top} Z`;
+  const hx = cx + rx;
+  const hp = o.handle === false ? "" : mug
+    ? `M${hx - 1} ${r1(top + depth * .18)} C${hx + 11} ${r1(top + depth * .08)} ${hx + 11} ${r1(top + depth * .84)} ${hx - 1.5} ${r1(top + depth * .78)}`
+    : `M${hx - 1.5} ${r1(top + depth * .2)} C${hx + 8} ${r1(top + depth * .02)} ${hx + 8} ${r1(top + depth * .8)} ${hx - 4} ${r1(top + depth * .74)}`;
+  const handle = hp ? `<path d="${hp}" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="${mug ? 5.2 : 4.2}" stroke-linecap="round"/>
+    <path d="${hp}" fill="none" stroke="${mixColor(color, "#000000", .06)}" stroke-width="${mug ? 3.2 : 2.4}" stroke-linecap="round"/>` : "";
+  const under = o.saucer ? saucerArt(u, cx, b + 1, rx * 1.62)
+    : `<ellipse cx="${cx}" cy="${r1(b + foot * K + 1)}" rx="${r1(foot + 4)}" ry="2.4" fill="currentColor" opacity=".13"/>`;
+  const fill = clamp01(o.fill ?? .85);
+  const liquid = o.surface === null ? "" : surface(cx, top + 0.8 + (1 - fill) * ry * 1.7, rx - 1.3 - (1 - fill) * 1.6, u, o.surface || {});
+  return `
+    <defs><linearGradient id="${ce}" x1="0" x2="1"><stop offset="0" stop-color="${mixColor(color, "#000000", .14)}"/><stop offset=".32" stop-color="${lt}"/><stop offset=".7" stop-color="${color}"/><stop offset="1" stop-color="${dk}"/></linearGradient>
+      <clipPath id="${rim}"><ellipse cx="${cx}" cy="${top}" rx="${rx - .6}" ry="${r1(ry - .4)}"/></clipPath></defs>
+    ${under}${handle}
+    <path d="${body}" fill="url(#${ce})" stroke="currentColor" stroke-opacity=".42" stroke-width="1.2" stroke-linejoin="round"/>
+    ${o.band || ""}
+    <ellipse cx="${cx}" cy="${top}" rx="${rx}" ry="${r1(ry)}" fill="url(#${u}ci)"/>
+    <g clip-path="url(#${rim})">${liquid}</g>
+    <ellipse cx="${cx}" cy="${top}" rx="${rx}" ry="${r1(ry)}" fill="none" stroke="${lt}" stroke-width="1.2"/>
+    <ellipse cx="${cx}" cy="${top}" rx="${rx + .5}" ry="${r1(ry + .4)}" fill="none" stroke="currentColor" stroke-opacity=".38" stroke-width=".9"/>
+    ${o.topping || ""}`;
+}
+
+function travelArt(u, { cx = 32, top, bot, rt, rb, color, k = "" }) {
+  const V = vessel([[top, rt], [bot, rb]], cx), ce = `${u}tv${k}`, cl = `${u}tc${k}`, ry = rt * K;
+  const h = bot - top, sy = top + h * .4, sh = h * .3;
+  return `
+    <defs><linearGradient id="${ce}" x1="0" x2="1"><stop offset="0" stop-color="${mixColor(color, "#000000", .25)}"/><stop offset=".3" stop-color="${mixColor(color, "#ffffff", .35)}"/><stop offset=".65" stop-color="${color}"/><stop offset="1" stop-color="${mixColor(color, "#000000", .4)}"/></linearGradient>
+      <clipPath id="${cl}"><path d="${V.d}"/></clipPath></defs>
+    <ellipse cx="${cx}" cy="${r1(bot + rb * K + 1)}" rx="${rb + 4}" ry="2.4" fill="currentColor" opacity=".13"/>
+    <path d="${V.d}" fill="url(#${ce})" stroke="currentColor" stroke-opacity=".42" stroke-width="1.2"/>
+    <g clip-path="url(#${cl})">
+      <rect x="${cx - rt - 2}" y="${r1(sy)}" width="${2 * rt + 4}" height="${r1(sh)}" fill="#000" opacity=".22"/>
+      ${[0, 1, 2, 3, 4].map((i) => `<path d="M${cx - rt} ${r1(sy + 2 + i * (sh - 4) / 4)} A${rt} ${r1(ry)} 0 0 0 ${cx + rt} ${r1(sy + 2 + i * (sh - 4) / 4)}" fill="none" stroke="#000" stroke-opacity=".18" stroke-width=".9"/>`).join("")}
+      <path d="M${r1(cx - rt + 3)} ${top + 4} L${r1(cx - rb + 2.6)} ${bot - 3}" stroke="#fff" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>
+    </g>
+    <path d="M${cx - rt - 1} ${top + 1} L${r1(cx - rt - .4)} ${top - 4.5} A${rt + .4} ${r1((rt + .4) * K)} 0 0 1 ${r1(cx + rt + .4)} ${top - 4.5} L${cx + rt + 1} ${top + 1} A${rt + 1} ${r1((rt + 1) * K)} 0 0 1 ${cx - rt - 1} ${top + 1} Z" fill="#2d2f33" stroke="currentColor" stroke-opacity=".4" stroke-width="1"/>
+    <ellipse cx="${cx}" cy="${top - 4.5}" rx="${rt + .4}" ry="${r1((rt + .4) * K)}" fill="#44474d"/>
+    <ellipse cx="${r1(cx + rt * .35)}" cy="${r1(top - 3.6)}" rx="2.6" ry="1" fill="#0d0d0e"/>`;
+}
+
+/* ---- toppings & garnishes */
+function whip(cx, y, w, extra = "") {
+  const c = INK.cream, s = "#e3d3b8";
+  return `<g stroke="${s}" stroke-width=".8">
+      <ellipse cx="${cx}" cy="${y}" rx="${w}" ry="${r1(w * .4)}" fill="${c}"/>
+      <ellipse cx="${r1(cx - w * .08)}" cy="${r1(y - w * .44)}" rx="${r1(w * .8)}" ry="${r1(w * .36)}" fill="${c}"/>
+      <ellipse cx="${r1(cx + w * .06)}" cy="${r1(y - w * .84)}" rx="${r1(w * .54)}" ry="${r1(w * .3)}" fill="${c}"/>
+      <path d="M${r1(cx - w * .24)} ${r1(y - w)} Q${cx} ${r1(y - w * 1.55)} ${r1(cx + w * .26)} ${r1(y - w * 1.02)} Z" fill="${c}"/></g>${extra}`;
+}
+function iceCubes(list) {
+  return list.map(([x, y, s, a]) => `<g transform="translate(${x} ${y}) rotate(${a})">
+      <rect x="${-s / 2}" y="${-s / 2}" width="${s}" height="${s}" rx="${r1(s * .22)}" fill="#fff" fill-opacity=".34" stroke="#fff" stroke-opacity=".85" stroke-width=".8"/>
+      <path d="M${r1(-s * .28)} ${r1(-s * .16)} L${r1(-s * .04)} ${r1(-s * .3)}" stroke="#fff" stroke-width="1.1" stroke-linecap="round"/></g>`).join("");
+}
+function straw(x1, y1, x2, y2, color) {
+  return `<path d="M${x1} ${y1} L${x2} ${y2}" stroke="${color}" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M${x1} ${y1} L${x2} ${y2}" stroke="#fff" stroke-opacity=".75" stroke-width="2.8" stroke-dasharray="2 2.4"/>`;
+}
+function drops(list) {
+  return list.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" fill-opacity=".55" stroke="#fff" stroke-opacity=".8" stroke-width=".4"/>`).join("");
+}
+function citrusWedge(x, y, r, color, rot = 0) {
+  return `<g transform="translate(${x} ${y}) rotate(${rot})">
+      <path d="M${-r} 0 A${r} ${r} 0 0 1 ${r} 0 Z" fill="${color}" stroke="${mixColor(color, "#000000", .3)}" stroke-width=".6"/>
+      <path d="M${r1(-r * .8)} 0 A${r1(r * .8)} ${r1(r * .8)} 0 0 1 ${r1(r * .8)} 0 Z" fill="${mixColor(color, "#ffffff", .55)}"/>
+      <path d="M0 0 L${r1(-r * .56)} ${r1(-r * .56)} M0 0 L0 ${r1(-r * .78)} M0 0 L${r1(r * .56)} ${r1(-r * .56)}" stroke="${color}" stroke-width=".8"/></g>`;
+}
+function bean(x, y, s, rot = 0) {
+  return `<g transform="translate(${x} ${y}) rotate(${rot})"><ellipse rx="${s}" ry="${r1(s * .66)}" fill="#4a2614" stroke="#2a1206" stroke-width=".5"/>
+      <path d="M${-s * .8} 0 Q0 ${r1(-s * .35)} ${s * .8} 0" fill="none" stroke="#1c0b03" stroke-width=".8"/></g>`;
+}
+function sparkle(x, y, s, color, delay = 0) {
+  return `<path class="rx-spark" style="animation-delay:${delay}s" d="M${x} ${y - s} Q${x} ${y} ${x + s} ${y} Q${x} ${y} ${x} ${y + s} Q${x} ${y} ${x - s} ${y} Q${x} ${y} ${x} ${y - s} Z" fill="${color}"/>`;
+}
+function steamArt(cx, y, w = 6) {
+  const p = (x, dy) => `M${x} ${y - dy} c-2.6 -3 2.6 -5 0 -8 c-1.6 -2 0 -3.6 0 -3.6`;
+  return `<g class="rx-steam" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="1.5" stroke-linecap="round">
+      <path d="${p(cx - w, 0)}"/><path style="animation-delay:-1.1s" d="${p(cx, 1.5)}"/><path style="animation-delay:-2.2s" d="${p(cx + w, 0)}"/></g>`;
+}
+const shadow = (cx, y, rx) => `<ellipse cx="${cx}" cy="${y}" rx="${rx}" ry="2.4" fill="currentColor" opacity=".13"/>`;
+const stemFoot = (cx, y1, y2, r) => `<path d="M${cx} ${y1} L${cx} ${y2}" stroke="currentColor" stroke-opacity=".55" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M${cx} ${y1} L${cx} ${y2}" stroke="#fff" stroke-opacity=".5" stroke-width=".8"/>
+    ${shadow(cx, y2 + 2.2, r)}
+    <ellipse cx="${cx}" cy="${y2}" rx="${r}" ry="${r1(r * K)}" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-opacity=".65" stroke-width="1.3"/>`;
+const glassHandle = (x, y1, y2, w = 7) => `<path d="M${x} ${y1} C${x + w} ${y1} ${x + w} ${y2} ${x} ${y2}" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M${x} ${y1} C${x + w} ${y1} ${x + w} ${y2} ${x} ${y2}" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="1"/>`;
+
+/* ---- the drinks */
+const DEMI = { cx: 30, top: 31, rx: 12.5, depth: 14, saucer: true };
+const GLASS_MUG = [[14, 13], [52, 11.8]];
+const HIGHBALL = [[8, 11.5], [55, 10.2]];
+const COUPE = [[24, 17], [28, 16], [33, 10.5], [36, 4]];
+
+const DRINKS = {
+  espresso: { tint: "#8a4b22", steam: [30, 26], draw: (c) => cupArt(c.u, { ...DEMI, fill: c.fill ?? .82 }) },
+  ristretto: { tint: "#5d2f14", steam: [30, 28], t: .8, draw: (c) => cupArt(c.u, { ...DEMI, top: 33, rx: 11, depth: 12, fill: c.fill ?? .6 }) },
+  espressoplus: { tint: "#e0a21a", steam: [30, 26], draw: (c) => cupArt(c.u, { ...DEMI, fill: c.fill ?? .85 }) +
+      sparkle(48, 16, 5, "#f2b01e") + sparkle(55, 26, 2.8, "#f6c84c", -.7) + sparkle(41, 9, 2.2, "#f6c84c", -1.3) },
+  doppio: { tint: "#7a3f1c", steam: [30, 23], draw: (c) => {
+    const pts = [[28, 13], [36, 12.4], [45, 10.4]];
+    return saucerArt(c.u, 30, 47, 19) + glassArt(c.u, { cx: 30, pts, fill: c.fill ?? .82,
+      layers: [{ f: .78, c: espresso(c.t) }, { f: .22, c: "#b8743a" }], surface: { fill: "crema" },
+      over: `<path d="M19.5 30 C20.5 37 22.5 43 25 45" fill="none" stroke="currentColor" stroke-opacity=".3" stroke-width=".9"/>` + glassHandle(42.6, 31, 41, 7) });
+  } },
+  lungo: { tint: "#94572a", steam: [30, 20], t: .4, draw: (c) => cupArt(c.u, { cx: 30, top: 25, rx: 12, depth: 20, foot: 6.5, saucer: true, fill: c.fill ?? .8 }) },
+  americano: { tint: "#9b5a2a", steam: [29, 9], draw: (c) => {
+    const bal = clamp01((c.balance ?? 50) / 100), espF = Math.max(.18, Math.min(.8, 1 - bal));
+    const layered = c.coffeeFirst === false;
+    const layers = layered
+      ? [{ f: 1 - espF, c: mixColor("#b5773d", espresso(c.t), .25) }, { f: espF * .9, c: espresso(c.t) }]
+      : [{ f: 1, c: mixColor(espresso(c.t), "#c4864a", bal * .55) }];
+    return shadow(29, 56, 15) + glassArt(c.u, { cx: 29, pts: GLASS_MUG, fill: c.fill ?? .82, layers, base: true,
+      surface: layered ? { fill: "crema" } : { fill: mixColor(espresso(c.t), "#d39a5c", .45), sheen: true },
+      over: glassHandle(40.6, 19, 42, 9) });
+  } },
+  coffee: { tint: "#8b5a2b", steam: [30, 22], draw: (c) => cupArt(c.u, { cx: 30, top: 28, rx: 15, depth: 15, foot: 8, saucer: true, fill: c.fill ?? .85,
+    surface: { fill: brewed(c.t), sheen: true } }) },
+  mug: { tint: "#8b5a2b", steam: [29, 14], draw: (c) => cupArt(c.u, { cx: 28, top: 20, rx: 13, depth: 32, shape: "mug", fill: c.fill ?? .85,
+    surface: { fill: brewed(c.t), sheen: true } }) },
+  xlbold: { tint: "#4b4f56", steam: [29, 12], t: .85, draw: (c) => cupArt(c.u, { cx: 28, top: 18, rx: 14, depth: 34, shape: "mug", color: "#3d4148", fill: c.fill ?? .88,
+    surface: { fill: brewed(c.t), sheen: true },
+    band: `<path d="M14 30 A14 4.2 0 0 0 42 30" fill="none" stroke="#e0a21a" stroke-width="2.2"/>` }) },
+  carafe: { tint: "#7a4a24", draw: (c) => {
+    const pts = [[14, 7.6], [18, 7.6], [24, 12], [34, 16.6], [45, 16], [53, 12.4]];
+    return shadow(30, 57, 16) + glassArt(c.u, { cx: 30, pts, fill: c.fill ?? .58, layers: [{ f: 1, c: brewed(c.t) }], surface: { fill: brewed(c.t + .1), sheen: true },
+      over: `<path d="M38 17 C49 17 50 27 45.5 37" fill="none" stroke="#2d2f33" stroke-width="3.4" stroke-linecap="round"/>
+        <path d="M21.6 12 L21.8 18.6 A8.2 2.5 0 0 0 38.2 18.6 L38.4 12 Z" fill="#2d2f33"/>
+        <ellipse cx="30" cy="12" rx="8.4" ry="2.5" fill="#44474d"/>
+        <path d="M21.8 13.4 L18.4 11.4" stroke="#2d2f33" stroke-width="2.4" stroke-linecap="round"/>` });
+  } },
+  travelmug: { tint: "#2f8f8f", draw: (c) => travelArt(c.u, { cx: 30, top: 14, bot: 54, rt: 11, rb: 9, color: "#2f8a8a" }) },
+  tumbler: { tint: "#c4613f", draw: (c) => travelArt(c.u, { cx: 30, top: 24, bot: 54, rt: 11.5, rb: 9.6, color: "#c4613f" }) },
+  pourover: { tint: "#a0703c", draw: (c) => {
+    const pts = [[38, 12], [46, 14.6], [55, 12.6]];
+    return shadow(32, 58, 16) + glassArt(c.u, { cx: 32, pts, fill: c.fill ?? .55, layers: [{ f: 1, c: brewed(c.t) }], surface: { fill: brewed(c.t + .1), sheen: true } }) + `
+      <path class="rx-drip" d="M32 35.5 q-1.4 2.2 0 3.2 q1.4 -1 0 -3.2 Z" fill="${brewed(c.t)}"/>
+      <ellipse cx="32" cy="35.2" rx="9.5" ry="2.6" fill="#ddd6cb" stroke="currentColor" stroke-opacity=".4" stroke-width="1"/>
+      <path d="M17 14 L26.5 33.6 A5.5 1.6 0 0 0 37.5 33.6 L47 14 A15 4.5 0 0 1 17 14 Z" fill="url(#${c.u}sa)" stroke="currentColor" stroke-opacity=".42" stroke-width="1.2"/>
+      <path d="M21 20 L27.6 32 M43 20 L36.4 32" stroke="#000" stroke-opacity=".08" stroke-width="1"/>
+      <path d="M18 14 Q20 9.5 23 12 Q26 8.5 29 11.6 Q32 8 35 11.6 Q38 8.5 41 12 Q44 9.5 46 14 Z" fill="#f2e8d5" stroke="#d9cbb0" stroke-width=".7"/>
+      <ellipse cx="32" cy="14" rx="13" ry="3.6" fill="#5a3a22"/>
+      <ellipse cx="29" cy="13.4" rx="5" ry="1.2" fill="#7a5233"/>`;
+  } },
+  water: { tint: "#4ea6d6", draw: (c) => shadow(29, 56, 14) + glassArt(c.u, { cx: 29, pts: [[20, 13], [52, 11.8]], fill: c.fill ?? .78, base: true,
+      layers: [{ f: 1, c: "#cfe7f5" }], surface: { fill: "#e9f6fc", sheen: true }, over: glassHandle(40.6, 24, 43, 9) }) + steamArt(29, 15, 6) },
+  coldbrew: { tint: "#3f8fbf", t: .75, draw: (c) => shadow(30, 58, 13) + glassArt(c.u, { cx: 30, pts: HIGHBALL, fill: c.fill ?? .86, base: true,
+      back: straw(37, 3, 31, 40, "#e0533d"),
+      layers: [{ f: 1, c: brewed(c.t) }], surface: { fill: mixColor(brewed(c.t), "#000000", .1), sheen: true },
+      inside: iceCubes([[25, 18, 8, 14], [34.5, 22, 7.5, -12], [27, 29, 7, 32]]),
+      over: drops([[21.5, 33, .9], [23, 41, .7], [38.5, 37, .8], [37.6, 46, .6]]) }) },
+  nitro: { tint: "#6d4c41", draw: (c) => shadow(30, 58, 13) + glassArt(c.u, { cx: 30, pts: [[7, 13], [17, 13.3], [55, 10]], fill: c.fill ?? .94, base: true,
+      layers: [{ f: .78, c: "#24130a" }, { f: .06, c: "#6b4a33" }, { f: .16, c: "#dcbc93" }], surface: { fill: "#f0dcc0" },
+      inside: [[24, 30], [29, 36], [34, 28], [27, 44], [33, 41], [36, 48], [25, 22], [31, 24]].map(([x, y], i) =>
+        `<circle class="rx-bub" style="animation-delay:${-i * .3}s" cx="${x}" cy="${y}" r="${i % 3 ? .7 : 1}" fill="#d8b68c" opacity=".7"/>`).join("") }) },
+  coldespresso: { tint: "#3c7fb0", draw: (c) => shadow(32, 58, 15) + glassArt(c.u, { cx: 32, pts: [[30, 15.5], [54, 13.5]], fill: c.fill ?? .74, base: true,
+      layers: [{ f: 1, c: espresso(c.t) }], surface: { fill: "crema" },
+      inside: iceCubes([[25.5, 35, 9, 12], [37.5, 34, 9, -18], [31, 39, 8.5, 40]]), over: drops([[19, 42, .8], [44.6, 46, .7]]) }) },
+  latte: { tint: "#c8955f", draw: (c) => shadow(31, 58, 12) + glassArt(c.u, { cx: 31, pts: [[10, 11.6], [55, 9.6]], fill: c.fill ?? .92, base: true,
+      layers: [{ f: .42, c: INK.milk }, { f: .3, c: "#b98a5c" }, { f: .28, c: INK.foam }], surface: { fill: "foam", art: "heart", artColor: "#bf8656" } }) },
+  vanillalatte: { tint: "#d9b45a", draw: (c) => shadow(31, 58, 12) + glassArt(c.u, { cx: 31, pts: [[10, 11.6], [55, 9.6]], fill: c.fill ?? .92, base: true,
+      layers: [{ f: .4, c: "#f3e1b6" }, { f: .3, c: "#c49a62" }, { f: .3, c: INK.foam }], surface: { fill: "foam", art: "rosetta", artColor: "#c79a5c" },
+      over: `<path d="M12 59 C22 55 40 55 52 57" fill="none" stroke="#3b2416" stroke-width="2.2" stroke-linecap="round"/>
+        <g transform="translate(43 9)">${[0, 72, 144, 216, 288].map((a) => `<ellipse rx="2" ry="4" cy="-3.2" fill="#fff4c8" stroke="#e9d27a" stroke-width=".5" transform="rotate(${a})"/>`).join("")}<circle r="1.6" fill="#e8b923"/></g>` }) },
+  cappuccino: { tint: "#b9824f", steam: [30, 24], draw: (c) => cupArt(c.u, { cx: 30, top: 30, rx: 16, depth: 13, foot: 8, saucer: true, fill: 1,
+    surface: { fill: INK.latte, art: "heart", artColor: INK.foam, spots: false } }) },
+  flatwhite: { tint: "#a87445", steam: [30, 24], draw: (c) => cupArt(c.u, { cx: 30, top: 30, rx: 14, depth: 14, saucer: true, fill: .95,
+    surface: { fill: "#b07a4a", art: "tulip", artColor: INK.foam, spots: false } }) },
+  cortado: { tint: "#a8693a", draw: (c) => shadow(32, 57, 13) + glassArt(c.u, { cx: 32, pts: [[27, 12], [52, 10.6]], fill: c.fill ?? .88, base: true,
+      layers: [{ f: .46, c: espresso(c.t) }, { f: .38, c: "#d8b38a" }, { f: .16, c: INK.foam }], surface: { fill: "foam", art: "dot", artColor: "#c08b5c" } }) },
+  macchiato: { tint: "#9a5e30", steam: [30, 25], draw: (c) => cupArt(c.u, { ...DEMI, fill: .9, surface: { fill: "crema" },
+    topping: `<path d="M24.4 32.4 Q30 26 35.6 32.4 Q30 34.4 24.4 32.4 Z" fill="url(#${c.u}fo)" stroke="#e3d3b8" stroke-width=".6"/>` }) },
+  mocha: { tint: "#5d3a29", draw: (c) => {
+    const y = liquidY(GLASS_MUG, .74);
+    return shadow(29, 56, 15) + glassArt(c.u, { cx: 29, pts: GLASS_MUG, fill: .74, base: true,
+      layers: [{ f: .26, c: INK.choc }, { f: .44, c: "#6e4129" }, { f: .3, c: "#c9a27e" }], surface: { fill: "#e8d6bf" },
+      over: glassHandle(40.6, 19, 42, 9) + whip(29, y + .5, 10.5,
+        `<path d="M21 ${r1(y - 1)} L25 ${r1(y - 5)} L28 ${r1(y - 1.5)} L32 ${r1(y - 7.5)} L35 ${r1(y - 2.5)} L37 ${r1(y - 5.5)}" fill="none" stroke="#4a2416" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>`) });
+  } },
+  affogato: { tint: "#cfa874", draw: (c) => glassArt(c.u, { cx: 32, pts: [[30, 16], [34, 15.2], [40, 11], [43, 5]], fill: .55,
+      layers: [{ f: 1, c: espresso(c.t) }], surface: { fill: "crema" },
+      over: `<circle cx="32" cy="24" r="9" fill="url(#${c.u}ic)" stroke="#dcc7a2" stroke-width=".7"/>
+        <path d="M23 26.5 q2 2.6 4 .6 q2 2.6 4 .4 q2 2.6 4 .4 q2 2.4 4 -.6 L40 31 Q32 33 24 31 Z" fill="#f4e6cc"/>
+        <path d="M27 16.6 Q31 14.6 35.6 17 Q35 20 33.4 19.4 L33 25.4 Q32.2 27 31.4 25.4 L31 19.8 Q29.6 22.6 28.6 21 Q28.6 19 27 16.6 Z" fill="${espresso(c.t)}" opacity=".92"/>` }) +
+      stemFoot(32, 43, 53, 11) },
+  barraquito: { tint: "#d9a23a", draw: (c) => shadow(31, 58, 11) + glassArt(c.u, { cx: 31, pts: [[8, 10], [55, 8.6]], fill: .9, base: true,
+      back: `<path d="M36 4 L33 30" stroke="${INK.cinnamon}" stroke-width="3" stroke-linecap="round"/><path d="M36 4 L33 30" stroke="#c27a45" stroke-width="1" stroke-linecap="round"/>`,
+      layers: [{ f: .16, c: INK.condensed }, { f: .16, c: INK.licor }, { f: .26, c: espresso(c.t) }, { f: .24, c: "#eadcc6" }, { f: .18, c: INK.foam }],
+      surface: { fill: "foam", dust: INK.cinnamon },
+      over: `<path d="M38.6 8.6 c3 -1 5.4 1 4.6 3.4 c-.8 2.4 -3.6 2.6 -3.2 5 c.3 1.8 2.4 2.2 3.4 1.2" fill="none" stroke="${INK.lemon}" stroke-width="2.4" stroke-linecap="round"/>` }) },
+  romano: { tint: "#d9b520", steam: [28, 26], draw: (c) => cupArt(c.u, { ...DEMI, cx: 28, fill: .82 }) +
+      `<path d="M38.4 50.4 c4 1.6 9 .6 11 -2.2 c1 -1.6 -.8 -2.8 -2 -1" fill="none" stroke="${INK.lemon}" stroke-width="2.6" stroke-linecap="round"/>` +
+      citrusWedge(17.5, 48.6, 5, INK.lemon, -8) },
+  martini: { tint: "#7a3f6b", draw: (c) => {
+    const pts = [[16, 19.5], [34, 1.6]], y = liquidY(pts, .82);
+    return glassArt(c.u, { cx: 32, pts, fill: .82, layers: [{ f: 1, c: espresso(c.t) }], surface: { fill: "#c89664", spots: false },
+      over: bean(27.4, y + .4, 2.2, -20) + bean(32, y - .8, 2.2, 5) + bean(36.6, y + .6, 2.2, 25) }) + stemFoot(32, 34.5, 52, 11);
+  } },
+  guillermo: { tint: "#6fae32", draw: (c) => shadow(30, 58, 15) + glassArt(c.u, { cx: 30, pts: [[28, 14.6], [54, 13]], fill: .62, base: true,
+      layers: [{ f: 1, c: espresso(c.t) }], surface: { fill: "crema" },
+      inside: iceCubes([[24, 37, 8.5, 12], [35, 36.4, 8.5, -16]]),
+      over: citrusWedge(42, 28.6, 7.5, INK.lime, 22) + drops([[17.6, 44, .8], [42.6, 47, .7]]) }) },
+  holiday: { tint: "#c0392b", draw: (c) => cupArt(c.u, { cx: 28, top: 26, rx: 13, depth: 28, shape: "mug", color: "#b3262e", fill: .9,
+    surface: { fill: brewed(c.t), sheen: true },
+    topping: whip(28, 27, 10.5, `<path d="M23 21.5 q1 -1.4 2 0 M31 19 q1 -1.4 2 0 M27 15.6 q1 -1.4 2 0 M33.4 24 q1 -1.4 2 0 M21.4 25.6 q1 -1.4 2 0" fill="none" stroke="#3b1a0e" stroke-width="1.1" stroke-linecap="round"/>`) +
+      `<g transform="translate(36 12)"><ellipse rx="5" ry="2.2" cx="3.6" fill="#2e7d32" transform="rotate(-25)"/><ellipse rx="5" ry="2.2" cx="-3.6" fill="#388e3c" transform="rotate(30)"/>
+        <circle cx="-.8" cy="1.2" r="1.7" fill="#d32f2f"/><circle cx="1.6" cy="2" r="1.6" fill="#e53935"/><circle cx=".4" cy="-.6" r="1.5" fill="#c62828"/></g>` }) },
+  icedcappuccino: { tint: "#5aa0c8", draw: (c) => shadow(30, 58, 13) + glassArt(c.u, { cx: 30, pts: HIGHBALL, fill: .9, base: true,
+      back: straw(38, 2, 32, 40, "#2f8fbf"),
+      layers: [{ f: .64, c: "#c39a6c" }, { f: .1, c: "#dcc1a0" }, { f: .26, c: INK.foam }], surface: { fill: "foam", dust: "#8a5a33" },
+      inside: iceCubes([[25, 33, 7.5, 14], [34.6, 38, 7, -10], [27, 45, 6.5, 30]]),
+      over: drops([[21.5, 35, .9], [38.6, 30, .8], [37.8, 48, .6]]) }) },
+  moonlight: { tint: "#5a5fb0", draw: (c) => glassArt(c.u, { cx: 32, pts: COUPE, fill: .78,
+      layers: [{ f: 1, c: "#e4dbe9" }], surface: { fill: "#f6f1fa", sheen: true },
+      over: `<path d="M41 9 L34.6 26" stroke="currentColor" stroke-opacity=".5" stroke-width="1" stroke-linecap="round"/>
+        <path d="M43 3 A6 6 0 1 0 43 15 A4.6 6 0 1 1 43 3 Z" fill="#f3dc8a" stroke="#d8bb5a" stroke-width=".6"/>` +
+        sparkle(18, 12, 2.6, "#a99cf0") + sparkle(50, 19, 2, "#a99cf0", -.8) + sparkle(24, 6, 1.6, "#c8bff8", -1.4) }) + stemFoot(32, 36, 52, 11) },
+  pumpkin: { tint: "#e07b28", draw: (c) => cupArt(c.u, { cx: 28, top: 26, rx: 13, depth: 28, shape: "mug", color: "#d9732b", fill: .9,
+    surface: { fill: "#b98256" },
+    topping: `<path d="M35 6 L32 24" stroke="${INK.cinnamon}" stroke-width="3" stroke-linecap="round"/><path d="M35 6 L32 24" stroke="#c27a45" stroke-width="1" stroke-linecap="round"/>` +
+      whip(28, 27, 10.5, DUST.slice(0, 10).map(([x, y]) => `<circle cx="${r1(28 + x * 8)}" cy="${r1(20 + y * 6)}" r=".75" fill="#b5541c"/>`).join("")) }) },
+};
+DRINKS.default = DRINKS.coffee;
+DRINKS.coldbrewdrip = DRINKS.coldbrew;
+
+// Draw a drink. `opts`: strength (0..1), fill (0..1), balance (water %), coffeeFirst, big.
+function drinkSvg(key, cls = "rx-icon", opts = {}) {
+  const k = String(key || "").toLowerCase().replace(/[^a-z]/g, "");
+  const d = DRINKS[k] || DRINKS.default;
+  const u = `d${++_artUid}`;
+  const t = clamp01(opts.strength ?? d.t ?? 0.6);
+  const body = d.draw({ u, t, fill: opts.fill, balance: opts.balance, coffeeFirst: opts.coffeeFirst, big: !!opts.big });
+  const steam = opts.big && d.steam ? steamArt(d.steam[0], d.steam[1]) : "";
+  // width/height attrs are a fallback; CSS on the class overrides them.
+  return `<svg class="${cls}" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">${artDefs(u, t)}${body}${steam}</svg>`;
+}
+const recipeIconSvg = (name, cls = "rx-icon", opts) => drinkSvg(name, cls, opts);
+const drinkTint = (key) => (DRINKS[String(key || "").toLowerCase().replace(/[^a-z]/g, "")] || DRINKS.default).tint;
+
+// Pick a drawing for a recipe: explicit icon, then its Spinn slug, then its name.
+const SLUG_ICON = {
+  "espresso-plus": "espressoplus", "xl-bold": "xlbold", "travel-mug-small": "tumbler", "travel-mug-large": "travelmug",
+  "iced-coffee": "nitro", "slow-cold-brew": "coldbrew", "cold-espresso": "coldespresso", "slow-drip": "pourover",
+  "hot-water": "water", "special-angelino": "affogato", "special-cafe-barraquito": "barraquito",
+  "special-cafe-romano": "romano", "espresso-martini": "martini", "special-guillermo": "guillermo",
+  "special-christmas": "holiday", "special-iced-latte": "icedcappuccino", "special-moonlight-fomo": "moonlight",
+  "special-pumpkin-spice": "pumpkin", "milk-latte": "latte", "milk-cappuccino": "cappuccino", "milk-flat-white": "flatwhite",
+  "milk-cortado": "cortado", "milk-macchiato": "macchiato", "milk-mocha": "mocha", "milk-vanilla-latte": "vanillalatte",
+};
 function iconFor(r) {
   if (!r) return "default";
   if (r.icon) return r.icon;
+  if (r.slug && SLUG_ICON[r.slug]) return SLUG_ICON[r.slug];
   const s = `${r.slug || ""} ${r.name || ""}`.toLowerCase();
   const rules = [
-    [/hot.?water/, "water"], [/cold|iced|nitro/, "coldbrew"], [/americano/, "americano"],
-    [/slow.?drip|pour/, "pourover"], [/carafe/, "carafe"], [/travel/, "travelmug"],
-    [/doppio/, "doppio"], [/ristretto/, "ristretto"], [/lungo/, "lungo"],
-    [/cappuccino/, "cappuccino"], [/latte/, "latte"], [/macchiato/, "macchiato"],
-    [/espresso/, "espresso"], [/mug|xl/, "mug"], [/coffee/, "coffee"],
+    [/hot.?water/, "water"], [/martini/, "martini"], [/affogato|angelino/, "affogato"], [/barraquito/, "barraquito"],
+    [/romano/, "romano"], [/guillermo/, "guillermo"], [/holiday|christmas/, "holiday"], [/pumpkin/, "pumpkin"],
+    [/moonlight/, "moonlight"], [/iced.?(cappuccino|latte)/, "icedcappuccino"], [/nitro/, "nitro"],
+    [/cold.?espresso/, "coldespresso"], [/cold|iced/, "coldbrew"], [/vanilla/, "vanillalatte"], [/mocha/, "mocha"],
+    [/flat.?white/, "flatwhite"], [/cortado/, "cortado"], [/americano/, "americano"], [/slow.?drip|pour/, "pourover"],
+    [/carafe/, "carafe"], [/travel.*(small|\bs\b)/, "tumbler"], [/travel/, "travelmug"], [/xl|bold/, "xlbold"],
+    [/doppio/, "doppio"], [/ristretto/, "ristretto"], [/lungo/, "lungo"], [/cappuccino/, "cappuccino"],
+    [/latte/, "latte"], [/macchiato/, "macchiato"], [/espresso.?(plus|🚀)|🚀/, "espressoplus"], [/espresso/, "espresso"],
+    [/mug/, "mug"], [/coffee/, "coffee"],
   ];
   if (r.cold) return "coldbrew";
   const hit = rules.find(([re]) => re.test(s));
@@ -182,12 +495,6 @@ function normalizeRecipes(list, machine) {
   });
 }
 
-function recipeIconSvg(name, cls = "rx-icon") {
-  const key = String(name || "").toLowerCase().replace(/[^a-z]/g, "");
-  const draw = RECIPE_ICONS[key] || RECIPE_ICONS.default;
-  // width/height attrs are a fallback; CSS on the class overrides them.
-  return `<svg class="${cls}" viewBox="0 0 48 48" width="24" height="24" aria-hidden="true">${draw()}</svg>`;
-}
 
 // Small UI glyphs (24x24, stroke = currentColor).
 const UI = {
@@ -485,6 +792,21 @@ const BASE_CSS = `
   button.sp.small { padding:6px 10px; font-size:.82rem; border-radius:10px; }
   button.sp .bi, svg.bi { width:18px; height:18px; flex:0 0 auto; }
   .rx-icon { width:24px; height:24px; flex:0 0 auto; }
+  .tile { --rx-tint: transparent; }
+  .tile, .stage { background:
+      radial-gradient(110% 85% at 50% 32%, color-mix(in srgb, var(--rx-tint) 30%, transparent), color-mix(in srgb, var(--rx-tint) 4%, transparent) 72%),
+      var(--spinn-chip-bg) !important; }
+  .tile:hover { filter: brightness(1.04); }
+  .drink.big .rx-steam path { animation: rxSteam 3.3s ease-in-out infinite; }
+  .drink.big .rx-bub { animation: rxBub 2.6s linear infinite; }
+  .drink.big .rx-drip { animation: rxDrip 1.5s ease-in infinite; }
+  .rx-spark { transform-box: fill-box; transform-origin: center; }
+  .drink.big .rx-spark { animation: rxSpark 2.2s ease-in-out infinite; }
+  @keyframes rxSteam { 0% { opacity:0; transform: translateY(3px); } 35% { opacity:1; } 100% { opacity:0; transform: translateY(-5px); } }
+  @keyframes rxBub { 0% { opacity:.9; transform: translateY(0); } 100% { opacity:0; transform: translateY(9px); } }
+  @keyframes rxDrip { 0% { opacity:0; transform: translateY(-2px); } 30% { opacity:1; } 100% { opacity:0; transform: translateY(5px); } }
+  @keyframes rxSpark { 0%,100% { transform: scale(.7); opacity:.65; } 50% { transform: scale(1.15); opacity:1; } }
+  @media (prefers-reduced-motion: reduce) { .drink * { animation: none !important; } }
   /* theme tokens — light: brushed silver */
   :host {
     --spinn-metal-1:#f3f4f6; --spinn-metal-2:#cdd1d7; --spinn-metal-3:#adb3bb; --spinn-metal-edge:#8f969f;
@@ -933,7 +1255,7 @@ class SpinnRecipeCard extends SpinnBase {
       .tile:active { transform: scale(.95); }
       .tile:disabled { opacity:.4; cursor:not-allowed; }
       .tile.active { box-shadow: inset 0 0 0 2px var(--primary-color); }
-      .tile .rx-icon { width:42px; height:42px; color: var(--primary-text-color); }
+      .tile .rx-icon { width:52px; height:52px; color: var(--primary-text-color); }
       .tile .rn { font-size:.86rem; font-weight:600; text-align:center; line-height:1.1; }
       .tile .rv { font-size:.72rem; color: var(--secondary-text-color); }
       .hint { margin-top:10px; font-size:.76rem; color: var(--secondary-text-color); }
@@ -977,7 +1299,7 @@ class SpinnRecipeCard extends SpinnBase {
     if (grid.dataset.sig !== sig) {
       grid.dataset.sig = sig;
       grid.innerHTML = recipes.map((r) => `
-        <button class="tile" data-action="recipe" data-slot="${esc(r.slot)}" data-name="${esc(r.name || "Slot " + r.slot)}" title="Slot ${esc(r.slot)}${r.custom ? " · your recipe" : ""}">
+        <button class="tile" style="--rx-tint:${drinkTint(iconFor(r))}" data-action="recipe" data-slot="${esc(r.slot)}" data-name="${esc(r.name || "Slot " + r.slot)}" title="Slot ${esc(r.slot)}${r.custom ? " · your recipe" : ""}">
           ${recipeIconSvg(iconFor(r))}
           <span class="rn">${esc(r.name || "Slot " + r.slot)}</span>
           <span class="rv">${esc([r.volume ? `${r.volume} ml` : null, ROLE_LABEL[r.role] || (r.volume ? null : `slot ${r.slot}`)].filter(Boolean).join(" · "))}</span>
@@ -1003,43 +1325,14 @@ const KIND_LABEL = { coffee: "Coffee", custom: "Mine", special: "Special", milk:
 const FILTERS = [["all", "All"], ["coffee", "Coffee"], ["custom", "Mine"], ["special", "Specials"], ["milk", "Milk"]];
 const SLOT_LABEL = (slot, role) => (ROLE_LABEL[role] ? ROLE_LABEL[role] : `Slot ${slot}`);
 
-function mixColor(a, b, t) {
-  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const [x, y] = [p(a), p(b)];
-  return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join("");
-}
-
-function previewCupSvg(r, vals) {
-  const adj = r.adjust || {};
-  const size = vals.size ?? (r.values || {}).size;
-  let frac = 0.62;
-  if (adj.size && size) frac = 0.28 + 0.72 * ((size - adj.size[0]) / Math.max(1, adj.size[1] - adj.size[0]));
-  else if (r.cup_ml && size) frac = Math.min(1, size / r.cup_ml);
-  frac = Math.max(0.12, Math.min(1, frac));
-  const st = vals.strength ?? (r.values || {}).strength;
-  const sFrac = adj.strength && st ? (st - adj.strength[0]) / Math.max(0.1, adj.strength[1] - adj.strength[0]) : 0.6;
-  const coffee = mixColor("#b98a5e", "#3f2414", Math.max(0, Math.min(1, sFrac)));
-  const top = 14, bot = 90, h = bot - top;
-  const milk = r.kind === "milk";
-  const fillTop = bot - frac * h;
-  const coffeeTop = milk ? bot - Math.min(frac, 0.3) * h : fillTop;
-  const ice = r.cold ? `
-      <rect x="27" y="${fillTop + 6}" width="11" height="11" rx="2.5" fill="#fff" opacity=".55" transform="rotate(-12 32 ${fillTop + 11})"/>
-      <rect x="41" y="${fillTop + 14}" width="10" height="10" rx="2.5" fill="#fff" opacity=".45" transform="rotate(16 46 ${fillTop + 19})"/>` : "";
-  return `
-    <svg class="pcup" viewBox="0 0 80 100" aria-hidden="true">
-      <defs><clipPath id="pcClip"><path d="M15 ${top} H65 L60 ${bot} Q59.6 ${bot + 3} 56 ${bot + 3} H24 Q20.4 ${bot + 3} 20 ${bot} Z"/></clipPath></defs>
-      <g clip-path="url(#pcClip)">
-        ${milk ? `<rect class="pc-fill" x="10" y="${fillTop}" width="60" height="${bot - fillTop + 4}" fill="#e9dccb"/>
-                  <rect class="pc-fill" x="10" y="${fillTop}" width="60" height="5" fill="#fbf7f1"/>` : ""}
-        <rect class="pc-fill" x="10" y="${coffeeTop}" width="60" height="${bot - coffeeTop + 4}" fill="${coffee}"/>
-        ${!milk ? `<rect class="pc-fill" x="10" y="${fillTop}" width="60" height="3" fill="${CREMA}" opacity=".9"/>` : ""}
-        ${ice}
-      </g>
-      <path d="M15 ${top} H65 L60 ${bot} Q59.6 ${bot + 3} 56 ${bot + 3} H24 Q20.4 ${bot + 3} 20 ${bot} Z"
-            fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" opacity=".85"/>
-      <path d="M19.5 20 L23 84" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6" stroke-linecap="round"/>
-    </svg>`;
+// The editor's big preview: the recipe's drawing, driven by the current values.
+function drinkPreviewSvg(r, vals) {
+  const adj = r.adjust || {}, v = { ...(r.values || {}), ...vals }, opts = { big: true };
+  if (adj.strength && v.strength != null) opts.strength = clamp01((v.strength - adj.strength[0]) / Math.max(0.1, adj.strength[1] - adj.strength[0]));
+  if (adj.size && v.size != null) opts.fill = 0.42 + 0.53 * clamp01((v.size - adj.size[0]) / Math.max(1, adj.size[1] - adj.size[0]));
+  if (v.balance != null) opts.balance = v.balance;
+  if (v.coffee_first != null) opts.coffeeFirst = v.coffee_first;
+  return drinkSvg(iconFor(r), "drink big", opts);
 }
 
 class SpinnRecipeEditorCard extends SpinnBase {
@@ -1068,21 +1361,22 @@ class SpinnRecipeEditorCard extends SpinnBase {
         background: var(--spinn-chip-bg); color: var(--primary-text-color); }
       .chip[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
       .chip .n { opacity:.6; margin-left:3px; font-variant-numeric: tabular-nums; }
-      .strip { display:grid; grid-auto-flow:column; grid-auto-columns: 84px; gap:8px; overflow-x:auto;
+      .strip { display:grid; grid-auto-flow:column; grid-auto-columns: 92px; gap:8px; overflow-x:auto;
         padding: 2px 2px 8px; scroll-snap-type:x proximity; scrollbar-width: thin; }
       .tile { scroll-snap-align:start; border:none; cursor:pointer; border-radius:14px; padding:9px 6px 8px; font:inherit;
         display:flex; flex-direction:column; align-items:center; gap:5px; background: var(--spinn-chip-bg);
         color: var(--primary-text-color); position:relative; min-width:0; }
       .tile:hover { background: var(--spinn-chip-hover); }
       .tile[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--primary-color); }
-      .tile .rx-icon { width:32px; height:32px; }
+      .tile .rx-icon { width:46px; height:46px; color: var(--primary-text-color); }
       .tile .tn { font-size:.74rem; font-weight:600; line-height:1.15; text-align:center;
         display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
       .tile .pin { position:absolute; top:6px; right:7px; width:7px; height:7px; border-radius:50%; background: var(--primary-color); }
       .panel { margin-top:6px; padding-top:12px; border-top:1px solid var(--divider-color, rgba(127,127,127,.25)); }
-      .hero { display:grid; grid-template-columns: 84px 1fr; gap:14px; align-items:start; }
-      .pcup { width:84px; height:auto; color: var(--primary-text-color); }
-      .pc-fill { transition: y .35s ease, height .35s ease, fill .35s ease; }
+      .hero { display:grid; grid-template-columns: 124px 1fr; gap:14px; align-items:start; }
+      .stage { width:124px; height:124px; border-radius:22px; display:grid; place-items:center; overflow:hidden;
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rx-tint) 22%, transparent); }
+      .drink.big { width:116px; height:116px; color: var(--primary-text-color); }
       .nm { font-size:1.12rem; font-weight:600; line-height:1.2; }
       .badges { display:flex; gap:6px; flex-wrap:wrap; margin:5px 0 6px; }
       .badge { font-size:.7rem; font-weight:600; letter-spacing:.03em; padding:2px 8px; border-radius:999px;
@@ -1128,7 +1422,7 @@ class SpinnRecipeEditorCard extends SpinnBase {
       .msg { font-size:.8rem; margin-top:10px; min-height:1.1em; color: var(--secondary-text-color); }
       .msg.err { color: ${TONE_COLOR.error}; }
       button.sp:focus-visible, .chip:focus-visible, .tile:focus-visible, .seg button:focus-visible { outline:2px solid var(--primary-color); outline-offset:2px; }
-      @media (max-width:430px){ .hero { grid-template-columns: 64px 1fr; } .pcup { width:64px; } }
+      @media (max-width:430px){ .hero { grid-template-columns: 96px 1fr; } .stage { width:96px; height:96px; } .drink.big { width:90px; height:90px; } }
     `;
     this.shadowRoot.innerHTML = `
       <style>${css}</style>
@@ -1211,7 +1505,7 @@ class SpinnRecipeEditorCard extends SpinnBase {
       return;
     }
     strip.innerHTML = list.map((r) => `
-      <button class="tile" role="option" data-act="pick" data-id="${esc(r.id)}" aria-pressed="${r.id === this._sel}" title="${esc(r.name)}">
+      <button class="tile" role="option" data-act="pick" data-id="${esc(r.id)}" aria-pressed="${r.id === this._sel}" title="${esc(r.name)}" style="--rx-tint:${drinkTint(iconFor(r))}">
         ${this._installed(r.id).length ? `<span class="pin" title="Installed in a slot"></span>` : ""}
         ${recipeIconSvg(iconFor(r))}<span class="tn">${esc(r.name)}</span>
       </button>`).join("");
@@ -1265,7 +1559,7 @@ class SpinnRecipeEditorCard extends SpinnBase {
     const items = (r.items || []);
     panel.innerHTML = `
       <div class="hero">
-        <div class="cupwrap">${previewCupSvg(r, v)}</div>
+        <div class="cupwrap stage" style="--rx-tint:${drinkTint(iconFor(r))}">${drinkPreviewSvg(r, v)}</div>
         <div>
           <div class="nm">${esc(r.name)}</div>
           <div class="badges">${badges}</div>
@@ -1333,7 +1627,7 @@ class SpinnRecipeEditorCard extends SpinnBase {
     if (!r) return;
     const v = this._effective(r);
     const cupwrap = root.querySelector(".cupwrap");
-    if (cupwrap) cupwrap.innerHTML = previewCupSvg(r, v);
+    if (cupwrap) cupwrap.innerHTML = drinkPreviewSvg(r, v);
     const parts = [];
     if (v.size) parts.push(`${Math.round(v.size)} ml`);
     if (v.strength) parts.push(`${(Math.round(v.strength * 2) / 2).toFixed(1)} g coffee`);
