@@ -13,6 +13,7 @@ import queue
 import uuid
 from typing import Any, Callable
 
+import certifi
 from awscrt import mqtt
 from awsiot import mqtt_connection_builder
 
@@ -35,12 +36,14 @@ class ReadOnlyShadow:
     # --- lifecycle ----------------------------------------------------------
     def connect(self, timeout: float = 15.0) -> None:
         client_id = "dizzy-" + uuid.uuid4().hex[:12]
-        # Server cert is validated against the platform trust store (Amazon Root CA).
+        # Server cert (Amazon Trust Services on the ATS endpoint) is validated against
+        # the certifi CA bundle — portable across macOS/Linux/Home Assistant.
         self._conn = mqtt_connection_builder.mtls_from_bytes(
             endpoint=self.endpoint,
             port=8883,
             cert_bytes=self._cert.encode(),
             pri_key_bytes=self._key.encode(),
+            ca_filepath=certifi.where(),
             client_id=client_id,
             clean_session=True,
             keep_alive_secs=30,

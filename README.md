@@ -4,8 +4,9 @@ Local, app-free control for the **Spinn** bean-to-cup coffee maker — so you ca
 state and brew from your own tools (e.g. [Home Assistant](https://www.home-assistant.io/))
 instead of the vendor's phone app.
 
-> **Status:** early. The protocol is fully reverse-engineered and documented
-> ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)); a **read-only** Python client is included. Writing
+> **Status:** the **read path is live-verified** against a real machine — sign-in, device +
+> certificate fetch, AWS IoT mutual-TLS, and reading the device shadow all work
+> ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)). A **read-only** Python client is included. Writing
 > commands (brew/start/stop) is specified but intentionally not wired into the CLI yet.
 
 ## What this is

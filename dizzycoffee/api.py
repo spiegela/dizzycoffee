@@ -92,7 +92,11 @@ class SpinnClient:
 
     # --- devices ------------------------------------------------------------
     def get_devices(self) -> list[dict]:
-        """GET link/api/devices -> list of Device records (each may embed a certificate)."""
+        """GET link/api/devices -> list of Device records.
+
+        Note: the list carries only a certificate *stub* (arn/id, no PEM/key).
+        Use get_device() for the full record with certificate_pem/private_key.
+        """
         body = self._request(
             "GET", self._url(self.iot_base, "link/api/devices"), auth=True,
         )
@@ -104,3 +108,18 @@ class SpinnClient:
                 if isinstance(body.get(key), list):
                     return body[key]
         raise SpinnError("unexpected devices payload", body=str(body)[:300])
+
+    def get_device(self, thing_name: str) -> dict:
+        """GET link/api/devices/{thing_name} -> full Device record.
+
+        This is the only endpoint that returns the usable client certificate
+        (certificate.certificate_pem + certificate.certificate_private_key).
+        """
+        body = self._request(
+            "GET", self._url(self.iot_base, f"link/api/devices/{thing_name}"), auth=True,
+        )
+        if isinstance(body, dict):
+            return body
+        if isinstance(body, list) and body:
+            return body[0]
+        raise SpinnError("unexpected device payload", body=str(body)[:300])

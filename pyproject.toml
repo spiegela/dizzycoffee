@@ -8,6 +8,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "requests>=2.31",
     "awsiotsdk>=1.21",
+    "certifi>=2024.2.2",
 ]
 
 [project.scripts]

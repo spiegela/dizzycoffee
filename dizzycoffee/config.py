@@ -16,7 +16,11 @@ from pathlib import Path
 # Baked-in defaults recovered from the official app (com.spinn.spinncoffee.app.AppConfig).
 DEFAULT_MP_BASE = "https://www.spinn.com/api/"
 DEFAULT_IOT_BASE = "https://iot.spinn.com/"
-DEFAULT_IOT_ENDPOINT = "a1gzieuy3t1932.iot.us-east-1.amazonaws.com"
+# The app ships the LEGACY endpoint (a1gzieuy3t1932.iot.…), whose server cert chains
+# to a VeriSign/Symantec root that modern trust stores no longer carry. We use the
+# equivalent ATS endpoint (…-ats.iot.…) — same account & device cert, but an Amazon
+# Trust Services server cert that validates against the standard CA bundle.
+DEFAULT_IOT_ENDPOINT = "a1gzieuy3t1932-ats.iot.us-east-1.amazonaws.com"
 
 
 def _config_dir() -> Path:

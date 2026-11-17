@@ -35,20 +35,20 @@ def _authed_client(cfg: Config) -> SpinnClient:
     return SpinnClient(cfg.mp_base, cfg.iot_base, access_token=token.get("access_token"))
 
 
-def _get_devices_with_refresh(cfg: Config) -> list[dict]:
-    """Fetch devices; on 401 try a single token refresh, then retry."""
+def _get_devices_with_refresh(cfg: Config) -> tuple[SpinnClient, list[dict]]:
+    """Return (authed client, devices); on 401 do one token refresh, then retry."""
     client = _authed_client(cfg)
     try:
-        return client.get_devices()
+        return client, client.get_devices()
     except SpinnError as e:
         if e.status != 401:
             raise
     token = cfg.read_session() or {}
     _eprint("Access token expired; refreshing…")
     client = SpinnClient(cfg.mp_base, cfg.iot_base)
-    new = client.refresh(token)
+    new = client.refresh(token)  # sets client.access_token
     cfg.write_session(new)
-    return client.get_devices()
+    return client, client.get_devices()
 
 
 def _pick_device(devices: list[dict], thing: str | None) -> dict:
@@ -92,17 +92,20 @@ def cmd_logout(cfg: Config, args) -> int:
 
 
 def cmd_devices(cfg: Config, args) -> int:
-    devices = _get_devices_with_refresh(cfg)
+    client, devices = _get_devices_with_refresh(cfg)
     if not devices:
         print("No machines on this account.")
         return 0
     for d in devices:
-        has_cert = bool((d.get("certificate") or {}).get("certificate_pem"))
-        print(f"• {d.get('name') or '(unnamed)'}")
-        print(f"    thing_name:  {d.get('thing_name')}")
-        print(f"    serial:      {d.get('serial_number')}")
-        print(f"    connected:   {d.get('connected')}")
-        print(f"    host/bridge: {d.get('current_host_version')} / {d.get('current_bridge_version')}")
+        # The list carries only a cert stub; the full record has the PEM/key.
+        full = client.get_device(d["thing_name"])
+        cert = full.get("certificate") or {}
+        has_cert = bool(cert.get("certificate_pem") and cert.get("certificate_private_key"))
+        print(f"• {full.get('name') or '(unnamed)'}")
+        print(f"    thing_name:  {full.get('thing_name')}")
+        print(f"    serial:      {full.get('serial_number')}")
+        print(f"    connected:   {full.get('connected')}")
+        print(f"    host/bridge: {full.get('current_host_version')} / {full.get('current_bridge_version')}")
         print(f"    certificate: {'present' if has_cert else 'MISSING'}")
     return 0
 
@@ -127,13 +130,15 @@ def _print_state(doc: dict, raw: bool) -> None:
 def cmd_state(cfg: Config, args) -> int:
     from .shadow import ReadOnlyShadow  # lazy import (awscrt) so other cmds don't need it
 
-    devices = _get_devices_with_refresh(cfg)
+    client, devices = _get_devices_with_refresh(cfg)
     dev = _pick_device(devices, args.thing)
-    cert = dev.get("certificate") or {}
+    # The usable cert only comes from the single-device endpoint.
+    full = client.get_device(dev["thing_name"])
+    cert = full.get("certificate") or {}
     pem, key = cert.get("certificate_pem"), cert.get("certificate_private_key")
     if not (pem and key):
-        raise SystemExit("Selected machine has no embedded certificate; cannot connect.")
-    thing = dev["thing_name"]
+        raise SystemExit("Selected machine has no usable certificate; cannot connect.")
+    thing = full["thing_name"]
     sh = ReadOnlyShadow(cfg.iot_endpoint, thing, pem, key)
     print(f"Connecting to {cfg.iot_endpoint} as {thing} (read-only)…")
     sh.connect()

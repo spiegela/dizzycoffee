@@ -208,12 +208,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "awsiotsdk" },
+    { name = "certifi" },
     { name = "requests" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "awsiotsdk", specifier = ">=1.21" },
+    { name = "certifi", specifier = ">=2024.2.2" },
     { name = "requests", specifier = ">=2.31" },
 ]
 

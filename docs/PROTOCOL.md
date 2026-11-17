@@ -7,6 +7,12 @@ Everything below is **[C] Confirmed** from decompiled source / Retrofit annotati
 `@SerializedName`, unless tagged **[L] verify live** (a runtime assumption worth a smoke test).
 App package `com.spinn.spinncoffee`.
 
+> **[V] Live-verified 2026-11-17** against a real machine with the DizzyCoffee read-only client:
+> email/password auth, device + certificate fetch, ATS MQTT mutual-TLS, and the shadow read path
+> all work. Three corrections from that run are folded in below and tagged **[V]**:
+> (1) the usable cert is only on the single-device endpoint; (2) connect to the **ATS** IoT
+> endpoint, not the legacy one the app ships; (3) the real `reported` shadow key set.
+
 ---
 
 ## 1. Architecture
@@ -24,7 +30,7 @@ login ───▶ POST www.spinn.com/api/auth/login  (email+password)   ─┐
 GET iot.spinn.com/link/api/devices  ────────────────────────────────┤─▶ Device{ thing_name,
    (bearer)                                                          │        certificate{pem, private_key}, ... }
                                                                      ▼
-MQTT 8883 mutual-TLS ─▶ a1gzieuy3t1932.iot.us-east-1.amazonaws.com
+MQTT 8883 mutual-TLS ─▶ a1gzieuy3t1932-ats.iot.us-east-1.amazonaws.com   [V] use the -ats endpoint
      publish  <thing>/host              = hex command string  (brew/start/stop/clean)
      pub/sub  $aws/things/<thing>/shadow/get[/accepted], /update/documents   = machine state
      sub      <thing>/host (+/bridge,/log)   = JSON events/acks (DeviceError envelope)
@@ -33,9 +39,18 @@ MQTT 8883 mutual-TLS ─▶ a1gzieuy3t1932.iot.us-east-1.amazonaws.com
 **Config (`com.spinn.spinncoffee.app.AppConfig`):**
 | Const | Value |
 |---|---|
-| `IOT_AWS_ENDPOINT` | `a1gzieuy3t1932.iot.us-east-1.amazonaws.com` (MQTT 8883) |
+| `IOT_AWS_ENDPOINT` (as shipped) | `a1gzieuy3t1932.iot.us-east-1.amazonaws.com` (MQTT 8883) |
+| **[V] actually connect to** | `a1gzieuy3t1932-ats.iot.us-east-1.amazonaws.com` (see note below) |
 | `API_MP_DOMAIN` (marketplace base) | `https://www.spinn.com/api/` |
 | `IOT_ENDPOINT` (iot base) | `https://iot.spinn.com/` |
+
+**[V] Endpoint — use ATS, not the shipped one.** The app ships the *legacy* IoT endpoint
+(`a1gzieuy3t1932.iot.…`), whose server certificate chains to an old VeriSign/Symantec root that
+modern CA bundles (certifi, current OS trust stores) no longer carry — a client that trusts the
+standard roots gets `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`. The
+equivalent **ATS** endpoint (`a1gzieuy3t1932-ats.iot.…`, same account prefix + `-ats`) routes to
+the same AWS IoT and accepts the same device cert, but presents an **Amazon Trust Services** server
+cert that validates against Amazon Root CA 1. Derive it by inserting `-ats` before `.iot.`.
 
 ---
 
@@ -55,7 +70,12 @@ MQTT 8883 mutual-TLS ─▶ a1gzieuy3t1932.iot.us-east-1.amazonaws.com
   `Token {access_token, refresh_token, token_type, expires_in, date_created, last_login_date}`.
 - **MQTT auth = per-user X.509 client cert, embedded in the `Device`:**
   `Device.certificate : AwsCertificate { id, certificate_pem, certificate_private_key }`
-  (`@SerializedName("certificate")`). The app writes it to a local BKS keystore
+  (`@SerializedName("certificate")`).
+  **[V]** The live object is richer — `{id, certificate_id, certificate_arn, certificate_pem,
+  certificate_private_key, certificate_pfx, device_id, created_at, updated_at, is_guest, …}` — and,
+  crucially, **`certificate_pem`/`certificate_private_key` are only returned by the single-device
+  endpoint** `GET link/api/devices/{thing_name}`. The list endpoint (`GET link/api/devices`) returns
+  only a cert **stub** (ids/arn, no PEM/key). The app writes it to a local BKS keystore
   (`AWSIotKeystoreHelper`, store `devicecrt`, pass `spinnIoT` — a local passphrase, **not** a server
   secret) and calls `mqttManager.connect(keystore, cb)`. A standalone client uses the PEM + private
   key directly (mutual TLS); no keystore needed.
@@ -76,6 +96,10 @@ Base `https://iot.spinn.com/` unless noted. (`Api.init(marketPlaceUrl, iotUrl)` 
 `GET average-consumer/api/coffee-backlog` · `POST log/api/machine-logs` (`CoffeeCommandLogEventBody`) ·
 `GET stats/api/user-stats`.
 
+> **[V]** `GET link/api/devices/{thing_name}` is the one to call for control: it returns the full
+> record **including the usable certificate** (the list endpoint omits the PEM/key). Auth is
+> `Authorization: Bearer <access_token>` — confirmed live.
+
 **`RecipesFunctionsApi`**: `GET recipe/api/recipes` · `GET recipe/api/cookbook` ·
 `PUT recipe/api/cookbook/slot` · `.../product` · `.../temporary-slot` · `GET recipe/api/recipes/shared/{id}` ·
 POST/DELETE `recipe/api/recipes[/{id}]`. → **cookbook slots are the recipe numbers** the brew commands select.
@@ -87,8 +111,9 @@ NotificationsFunctionsApi, RoasterFunctionsApi, MarketplaceFunctionsApi, IotWith
 
 ## 4. AWS IoT MQTT
 
-- **Broker** `a1gzieuy3t1932.iot.us-east-1.amazonaws.com:8883`, mutual TLS (AWS ATS root CA + §2 client
-  cert), client id `"Android"+UUID` (pick your own). All pub/sub **QoS 1**. `<thing>` = `Device.thingName`.
+- **Broker [V]** `a1gzieuy3t1932-ats.iot.us-east-1.amazonaws.com:8883` (ATS; see §1), mutual TLS
+  (Amazon Root CA 1 for the server + §2 client cert), client id `"Android"+UUID` (pick your own).
+  All pub/sub **QoS 1**. `<thing>` = `Device.thingName`.
 
 | Topic (`%s`←thing) | Dir | Purpose |
 |---|---|---|
@@ -127,19 +152,33 @@ firmware-update events `"ota_state"`.
 
 ## 6. Device Shadow / state (for HA sensors)
 
-`reported` shadow doc → `DeviceShadow`. **Exact JSON keys (PascalCase):**
+**[V] Envelope.** `$aws/things/<thing>/shadow/get/accepted` returns the standard document:
+`{ "state": { "reported": { … } }, "metadata": {…}, "version": <int>, "timestamp": <epoch> }`.
+`update/documents` wraps changes under `{ "current": {…}, "previous": {…} }`. **All reported values
+are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse accordingly.
 
-- **Consumables:** `HopperReservoir` (beans), `WaterTank` + `WaterVolume`, `ResidueBin` + `ResidueBinCapacity`
-  (grounds), `DripTray` + `DripTrayCapacity`.
-  Level enum: `EMPTY, EMPTYORREMOVED, FULL, LEVEL1, LEVEL2, OK, PLACED, REMOVED`.
+**[V] Reported keys observed live (machine idle, 28 keys):**
+
+- **Consumables:** `HopperReservoir` (beans), `WaterTank` + `WaterVolume`, `ResidueBin` +
+  `ResidueBinCapacity` (grounds), `DripTray` + `DripTrayCapacity`, `WaterLineStatus`.
+  Level enum (from source + live): `EMPTY, EMPTYORREMOVED, FULL, LEVEL0, LEVEL1, LEVEL2, OK, PLACED,
+  REMOVED` — note **`LEVEL0`** (seen live) was not in the decompiled enum. `WaterLineStatus` e.g.
+  `WL_CONNECTED`.
 - **State:** `MachineStatus` `{READY, ACTIVE, STANDBY, CLEANING, EXPELL, PREPAREDRINK, MACHINEERROR,
-  RECOVERING, RECOVERY, SPECIALTASK, INACTIVE, UNDEFINED}`; `ProcessStatus` `{WAITFORWATER, WAITFORPREHEAT,
-  WAITFORDRIPTRAY, WAITFORRESIDUEBIN, WAITFORCOOLDOWN, WAITFORPREFLUSHVOLUME, WAITFORBREWERPREFLUSHSPEED}`.
-- **Components:** `BrewerStatus, GrinderStatus, RingheaterStatus, SpinnMotorStatus, TransportMotorStatus,
-  SpoutMotorStatus, FillingSystemStatus, WaterSystemStatus`.
-- **Brew bookkeeping:** `RecipeNumber`, `ShotCount`. **Conn:** `connected`.
-- Derived in-SDK (not on wire): `isBrewing, isCleaning, isError, isReady, isPreheat, isRecovering, …`,
-  `brewingBlockers[]`. Values arrive as strings.
+  RECOVERING, RECOVERY, SPECIALTASK, INACTIVE, UNDEFINED}`; `ProcessStatus` `{…, UNDEFINED}`;
+  `ResetReason` e.g. `POWERON`.
+- **Brew bookkeeping:** `RecipeNumber`, `ShotCount`, `ColdbrewCounter`, `CoffeeCountersTtl`,
+  `GrinderMasterCounter`, `GrinderUserCounter`, `FilterCounter`, `NoDeepCleanCounter`,
+  `NoDescaleCounter`.
+- **`recipes`** *(array of strings)* — the on-device cookbook. Each entry is a CSV of ~60 integers
+  (one recipe/slot profile); `RecipeNumber` indexes into this table. This is the slot↔recipe source
+  for brew commands (see §5). Live example had 8 entries, `RecipeNumber="5"`.
+- **Telemetry/health:** `AirPressure`, `WiFiRssi`, `BleRssi`, `DRAM`, `IRAM`, `LiftMagnetPosition`.
+  **Conn:** `connected` (`"true"`/`"false"`).
+- **Component statuses** (`BrewerStatus, GrinderStatus, RingheaterStatus, SpinnMotorStatus,
+  TransportMotorStatus, SpoutMotorStatus, FillingSystemStatus, WaterSystemStatus`) and the derived
+  SDK flags (`isBrewing, isCleaning, …`, `brewingBlockers[]`) are defined in the app but were **not**
+  present in the idle `reported` doc — they likely appear only while the machine is active. **[L]**
 
 `Device` record also carries maintenance state: `last_cleaning_at`/`after_cleaning_cups_count_shadow`,
 `last_descaling_at`/`after_descaling_cups_count_shadow`, `last_water_filter_changing_at`, `air_pressure`,
@@ -149,20 +188,23 @@ firmware-update events `"ota_state"`.
 
 ## 7. Verify-live checklist (small smoke test, [L] items)
 
-1. `Authorization: Bearer <access_token>` header shape (near-certain, confirm with one authed GET).
-2. Exact brew sequence: `SELECT_RECIPE` then `PREPARE_RECIPE`, or `PREPARE_RECIPE` alone; and the ack shape.
-3. Cookbook slot ↔ recipe mapping (`GET recipe/api/cookbook`) and whether slot byte is 0- or 1-based.
-4. Exact reported-shadow JSON envelope (`state.reported` wrapper, value casing).
+1. ~~`Authorization: Bearer <access_token>` header shape~~ — **[V] confirmed.**
+2. Exact brew sequence: `SELECT_RECIPE` then `PREPARE_RECIPE`, or `PREPARE_RECIPE` alone; and the ack shape. **[L]**
+3. Cookbook slot ↔ recipe mapping and whether the slot byte is 0- or 1-based — the shadow `recipes`
+   array and `RecipeNumber` are the likely source (§6); confirm the byte base against a brew. **[L]**
+4. ~~Exact reported-shadow JSON envelope~~ — **[V] confirmed** (`state.reported`, all string values; §6).
+5. Component/active-brew shadow keys — only observable while the machine runs. **[L]**
 
-These need only a read + one brew with you present; everything else is pinned.
+Only the brew-side items remain; the entire read path is live-verified. They need one brew with you present.
 
 ---
 
 ## 8. Feasibility
 
-- **Tier 1 (app-free via Spinn cloud): fully specified, ready to build.** auth → `GET link/api/devices`
-  (thing + cert) → MQTT mutual-TLS → read shadow / publish hex to `host`. Only [L] runtime checks remain.
-  **The read-only client in this repo implements Tier 1 up to (but not including) publishing to `host`.**
+- **Tier 1 (app-free via Spinn cloud): [V] read path live-verified.** auth → `GET
+  link/api/devices/{thing}` (thing + cert) → ATS MQTT mutual-TLS → read shadow — all working end to
+  end. Publishing hex to `host` is specified but unexercised ([L]). **The read-only client in this
+  repo implements Tier 1 up to (but not including) publishing to `host`.**
 - **Tier 2 (no cloud): gated on one untested fact** — whether the machine's own TLS link to the ATS
   endpoint validates/pins the server cert+hostname. If not, redirect it (LAN DNS → local broker emulating
   the `$aws/things/…/shadow/…` + `<thing>/host` topics). No local path exists in firmware for normal use.
@@ -174,13 +216,13 @@ These need only a read + one brew with you present; everything else is pinned.
 ```python
 # auth:  POST https://www.spinn.com/api/auth/login {email,password} -> token{access_token, refresh_token}
 #        (refresh via POST auth/token with the stored token)
-# device: GET https://iot.spinn.com/link/api/devices  (Bearer access_token)
-#   -> thing_name, certificate.certificate_pem, certificate.certificate_private_key
+# device: GET https://iot.spinn.com/link/api/devices/<thing_name>  (Bearer access_token)  [V]
+#   -> certificate.certificate_pem, certificate.certificate_private_key  (the list omits these)
 # iot (awscrt/awsiotsdk):
 mqtt = mqtt_connection_builder.mtls_from_bytes(
-    endpoint="a1gzieuy3t1932.iot.us-east-1.amazonaws.com",
+    endpoint="a1gzieuy3t1932-ats.iot.us-east-1.amazonaws.com",   # [V] ATS, not the shipped endpoint
     cert_bytes=pem.encode(), pri_key_bytes=private_key.encode(),
-    ca_bytes=AMAZON_ROOT_CA1, client_id="dizzy-"+uuid4().hex)
+    ca_filepath=certifi.where(), client_id="dizzy-"+uuid4().hex)  # [V] certifi has Amazon Root CA 1
 mqtt.subscribe(f"$aws/things/{thing}/shadow/update/documents", QoS.AT_LEAST_ONCE, on_shadow)
 mqtt.subscribe(f"{thing}/host", QoS.AT_LEAST_ONCE, on_event)
 mqtt.publish(f"$aws/things/{thing}/shadow/get", "", QoS.AT_LEAST_ONCE)   # read state (passive)
