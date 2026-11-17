@@ -10,6 +10,8 @@ from typing import Any
 
 import requests
 
+from .recipes import BREWABLE_SLOTS, SLOT_ROLES
+
 USER_AGENT = "DizzyCoffee/0.1 (+https://github.com/spiegela/dizzycoffee)"
 TIMEOUT = 20
 
@@ -123,3 +125,118 @@ class SpinnClient:
         if isinstance(body, list) and body:
             return body[0]
         raise SpinnError("unexpected device payload", body=str(body)[:300])
+
+    # --- recipes (read-only) ------------------------------------------------
+    def get_cookbook(self, thing_name: str) -> dict:
+        """GET recipe/api/cookbook?thing_name=... -> the machine's installed slots.
+
+        ``{"thing_name", "slots": [{"recipe_id", "status", ...}, ...]}``.
+        ``slots[i]`` is brewed with slot byte ``i`` (0-based; = shadow
+        ``RecipeNumber``). Layout per the app (``Cookbook``/``RecipesRepository``):
+        0-3 user slots, 4/5/6 the machine's tall/medium/small cup buttons, 7 the
+        temporary slot for one-off brews. Without ``thing_name`` the endpoint 404s.
+        """
+        body = self._request(
+            "GET", self._url(self.iot_base, "recipe/api/cookbook"),
+            params={"thing_name": thing_name}, auth=True,
+        )
+        if isinstance(body, dict) and isinstance(body.get("slots"), list):
+            return body
+        raise SpinnError("unexpected cookbook payload", body=str(body)[:300])
+
+    def get_recipes(self, thing_name: str, all: bool = False) -> list[dict]:  # noqa: A002
+        """GET recipe/api/recipes?thing_name=...[&all=true] -> recipe records.
+
+        Default: the account's library (stock + the user's custom recipes).
+        ``all=True`` adds the "technical" specials (Affogato, Espresso Martini…)
+        the app lists under Specials. Milk drinks are not here: the app
+        hard-codes them as a ristretto shot plus frothing instructions.
+        """
+        params = {"thing_name": thing_name}
+        if all:
+            params["all"] = "true"
+        body = self._request(
+            "GET", self._url(self.iot_base, "recipe/api/recipes"), params=params, auth=True,
+        )
+        if isinstance(body, list):
+            return body
+        raise SpinnError("unexpected recipes payload", body=str(body)[:300])
+
+    def get_installed_recipes(self, thing_name: str, library: list[dict] | None = None) -> list[dict]:
+        """Cookbook slots joined to their recipe records, one dict per slot.
+
+        Each item: ``{slot, role, recipe_id, name, slug, type, drink_size,
+        shots, cold, image_url}``. ``slot`` is the 0-based brew byte; ``role``
+        is ``user1``..``user4``, ``tall``/``medium``/``small`` (the machine's
+        cup buttons) or ``temp``. ``type`` is ``"spinn"``, ``"custom"`` or
+        ``"technical"``; ``drink_size`` is ml. Unresolvable slots keep
+        ``name=None``.
+        """
+        book = self.get_cookbook(thing_name)
+        if library is None:
+            library = self.get_recipes(thing_name, all=True)
+        by_id = {r.get("id"): r for r in library if isinstance(r, dict)}
+        out: list[dict] = []
+        for i, slot in enumerate(book.get("slots") or []):
+            rid = (slot or {}).get("recipe_id")
+            r = by_id.get(rid, {})
+            out.append({
+                "slot": i,
+                "role": SLOT_ROLES.get(i),
+                "recipe_id": rid,
+                "name": r.get("name"),
+                "slug": r.get("slug"),
+                "type": r.get("type"),
+                "drink_size": r.get("drink_size"),
+                "shots": r.get("shots"),
+                "cold": bool(r.get("cooldown_machine")),
+                "image_url": r.get("image_url"),
+            })
+        return out
+
+    # --- recipe writes ------------------------------------------------------
+    # These change the Spinn ACCOUNT (the cloud then syncs the cookbook to the
+    # machine). None of them brews. Bodies are the app's own (docs §3, [V] for
+    # temporary-slot and create/delete, exercised live 2026-11-17).
+    @staticmethod
+    def _clean(body: dict) -> dict:
+        return {k: v for k, v in body.items() if v is not None}
+
+    def set_temporary_slot(self, thing_name: str, recipe_id: str, **floats: Any) -> dict:
+        """PUT recipe/api/cookbook/temporary-slot — stage a one-off recipe in slot 7.
+
+        ``floats`` may carry ``coffee_strength_float``, ``water_level_float``,
+        ``water_balance_float``, ``coffee_order`` (see ``recipes.to_floats``).
+        Brew it afterwards with PREPARE_RECIPE + 7.
+        """
+        return self._request(
+            "PUT", self._url(self.iot_base, "recipe/api/cookbook/temporary-slot"), auth=True,
+            json=self._clean({"thing_name": thing_name, "recipe_id": recipe_id, **floats}),
+        )
+
+    def create_custom_recipe(
+        self, thing_name: str, recipe_slug: str, name: str, **floats: Any
+    ) -> dict:
+        """POST recipe/api/recipes — save a custom copy of the base recipe ``recipe_slug``."""
+        body = self._request(
+            "POST", self._url(self.iot_base, "recipe/api/recipes"), auth=True,
+            json=self._clean({"thing_name": thing_name, "recipe_slug": recipe_slug, "name": name, **floats}),
+        )
+        if isinstance(body, dict) and body.get("id"):
+            return body
+        raise SpinnError("unexpected create-recipe payload", body=str(body)[:300])
+
+    def set_cookbook_slot(self, thing_name: str, slot: int, recipe_id: str) -> dict:
+        """PUT recipe/api/cookbook/slot — install ``recipe_id`` into ``slot`` (0-6)."""
+        if slot not in BREWABLE_SLOTS:
+            raise SpinnError(f"slot must be 0-6, got {slot}")
+        return self._request(
+            "PUT", self._url(self.iot_base, "recipe/api/cookbook/slot"), auth=True,
+            json={"thing_name": thing_name, "slot": int(slot), "recipe_id": recipe_id},
+        )
+
+    def delete_custom_recipe(self, recipe_id: str) -> Any:
+        """DELETE recipe/api/recipes/{id} — remove one of the user's custom recipes."""
+        return self._request(
+            "DELETE", self._url(self.iot_base, f"recipe/api/recipes/{recipe_id}"), auth=True,
+        )

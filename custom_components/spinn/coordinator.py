@@ -26,6 +26,7 @@ library surfaces as a clear setup error instead of breaking discovery.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import queue
@@ -53,6 +54,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # awscrt QoS 1, imported lazily where needed.
 _CONNECT_TIMEOUT = 15.0
+# Cookbook changes only when the user edits it in the app; re-read every 15 min.
+_COOKBOOK_TTL = 900.0
 
 
 def extract_reported(doc: dict[str, Any]) -> dict[str, Any]:
@@ -190,6 +193,14 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device: dict[str, Any] = {}
         # Local-only recipe slot picked in HA for the Brew button (no actuation).
         self.selected_slot: int | None = None
+        # Installed cookbook (slot -> recipe name/size), from the recipe REST API.
+        # Refreshed at most every _COOKBOOK_TTL seconds; kept on fetch failure.
+        self.cookbook: list[dict[str, Any]] = []
+        self._cookbook_at: float = 0.0
+        # Full recipe catalog (library + specials + milk guides), slimmed for HA,
+        # and the raw server records by id (needed for slider maths on writes).
+        self.catalog: list[dict[str, Any]] = []
+        self._library: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------ reads
     async def _async_update_data(self) -> dict[str, Any]:
@@ -246,6 +257,7 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ) from err2
 
         self.device = full
+        self._refresh_cookbook_blocking(SpinnError)
         cert = full.get("certificate") or {}
         pem = cert.get("certificate_pem")
         key = cert.get("certificate_private_key")
@@ -280,6 +292,32 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             doc = self._stream.get_snapshot()
 
         return extract_reported(doc), new_token
+
+    def _refresh_cookbook_blocking(self, spinn_error: type[Exception], force: bool = False) -> None:
+        """Re-read the recipe library + cookbook if stale. Never fails the refresh."""
+        if not force and self.cookbook and time.monotonic() - self._cookbook_at < _COOKBOOK_TTL:
+            return
+        if not hasattr(self._client, "get_installed_recipes"):  # older dizzycoffee
+            return
+        try:
+            from dizzycoffee import recipes  # lazy
+
+            library = self._client.get_recipes(self.thing, all=True)
+            self.cookbook = self._client.get_installed_recipes(self.thing, library=library)
+            self._library = {r["id"]: r for r in library if isinstance(r, dict) and r.get("id")}
+            self.catalog = recipes.build_catalog(library)
+            self._cookbook_at = time.monotonic()
+        except (spinn_error, ValueError, KeyError, TypeError) as err:
+            _LOGGER.debug("recipe/cookbook fetch failed (%s); keeping previous", err)
+
+    def slot_name(self, slot: int | None) -> str | None:
+        """Recipe name installed in ``slot``, if known."""
+        if slot is None:
+            return None
+        for item in self.cookbook:
+            if item.get("slot") == slot:
+                return item.get("name")
+        return None
 
     # ------------------------------------------------------------------ push
     def _push_reported(self, reported: dict[str, Any]) -> None:  # awscrt thread
@@ -318,6 +356,111 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         from dizzycoffee.commands import DeviceCommand  # lazy
 
         await self._run_commands([(DeviceCommand.HOPPER_FLUSH, None)])
+
+    # ------------------------------------------------------ recipe operations
+    # Account writes (cookbook / custom recipes). Only brew_recipe also
+    # actuates the machine, and it does so through the same command path as
+    # the Brew button.
+    def _recipe(self, recipe_id: str) -> dict[str, Any]:
+        from dizzycoffee import recipes  # lazy
+
+        if recipe_id in recipes.MILK_IDS:
+            base = next(
+                (r for r in self._library.values()
+                 if r.get("slug") == recipes.MILK_BASE_SLUG and r.get("type") == "spinn"),
+                None,
+            )
+            if base is None:
+                raise HomeAssistantError("Milk drinks need the stock Ristretto recipe, which wasn't found.")
+            return base
+        rec = self._library.get(recipe_id)
+        if rec is None:
+            raise HomeAssistantError(f"Unknown Spinn recipe id {recipe_id!r}.")
+        return rec
+
+    def _client_or_raise(self):
+        if self._client is None:
+            raise HomeAssistantError("Spinn is not connected yet; try again shortly.")
+        return self._client
+
+    async def _account_write(self, fn: Callable[[], Any]) -> Any:
+        """Run an account write in the executor, then re-read the cookbook."""
+        from dizzycoffee.api import SpinnError  # lazy
+
+        def _job():
+            try:
+                return fn()
+            except SpinnError as err:
+                raise HomeAssistantError(f"Spinn rejected the change: {err}") from err
+            finally:
+                try:
+                    self._refresh_cookbook_blocking(SpinnError, force=True)
+                except Exception:  # noqa: BLE001 - refresh is best-effort
+                    pass
+
+        result = await self.hass.async_add_executor_job(_job)
+        self.async_update_listeners()
+        return result
+
+    async def async_brew_recipe(self, recipe_id: str, **values: Any) -> None:
+        """Brew any recipe once (staged in the temporary slot), optionally adjusted.
+
+        ``values``: ``strength_g``, ``size_ml``, ``balance_pct``, ``coffee_first``.
+        Leaves cookbook slots 0-6 untouched — this is how the app brews drinks
+        that aren't installed.
+        """
+        from dizzycoffee import recipes  # lazy
+
+        rec = self._recipe(recipe_id)
+        floats = recipes.to_floats(rec, **values)
+        client = self._client_or_raise()
+        await self._account_write(lambda: client.set_temporary_slot(self.thing, rec["id"], **floats))
+        await asyncio.sleep(1.5)  # let the cloud push the staged recipe to the machine
+        await self.async_brew(recipes.TEMP_SLOT)
+
+    async def async_save_recipe(
+        self, base_recipe_id: str, name: str, slot: int | None = None, **values: Any
+    ) -> dict[str, Any]:
+        """Save a custom copy of a recipe, optionally installing it into ``slot``."""
+        from dizzycoffee import recipes  # lazy
+
+        if base_recipe_id in recipes.MILK_IDS:
+            raise HomeAssistantError("Milk drinks are guides, not machine recipes; save a Ristretto instead.")
+        rec = self._recipe(base_recipe_id)
+        if not rec.get("slider"):
+            raise HomeAssistantError(f"{rec.get('name')} is a fixed recipe and can't be customised.")
+        floats = recipes.to_floats(rec, **values)
+        client = self._client_or_raise()
+
+        def _do():
+            created = client.create_custom_recipe(self.thing, rec["slug"], name.strip(), **floats)
+            if slot is not None:
+                client.set_cookbook_slot(self.thing, int(slot), created["id"])
+            return created
+
+        created = await self._account_write(_do)
+        return {"id": created.get("id"), "name": created.get("name"), "slot": slot}
+
+    async def async_install_recipe(self, recipe_id: str, slot: int) -> None:
+        """Install an existing recipe (stock or custom) into cookbook slot 0-6."""
+        rec = self._recipe(recipe_id)
+        if rec.get("type") == "technical":
+            raise HomeAssistantError("Specials can't be installed in a slot; use Brew once instead.")
+        client = self._client_or_raise()
+        await self._account_write(lambda: client.set_cookbook_slot(self.thing, int(slot), rec["id"]))
+
+    async def async_delete_recipe(self, recipe_id: str) -> None:
+        """Delete one of the user's custom recipes (refuses stock or installed ones)."""
+        rec = self._recipe(recipe_id)
+        if rec.get("type") != "custom":
+            raise HomeAssistantError("Only your own custom recipes can be deleted.")
+        used = [c["slot"] for c in self.cookbook if c.get("recipe_id") == recipe_id and c.get("role") != "temp"]
+        if used:
+            raise HomeAssistantError(
+                f"{rec.get('name')} is installed in slot {used[0]}; put another recipe there first."
+            )
+        client = self._client_or_raise()
+        await self._account_write(lambda: client.delete_custom_recipe(rec["id"]))
 
     async def _run_commands(self, steps: list[tuple[Any, int | None]]) -> None:
         if not (self._cert and self._key):

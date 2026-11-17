@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -20,6 +21,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT, EntityCategory, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import SpinnCoordinator
@@ -43,11 +45,29 @@ def _int(data: dict[str, Any], key: str) -> int | None:
         return None
 
 
+def _timestamp(data: dict[str, Any], key: str) -> datetime | None:
+    val = data.get(key)
+    if not val:
+        return None
+    parsed = dt_util.parse_datetime(str(val))
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_util.UTC)
+    return parsed
+
+
 @dataclass(frozen=True, kw_only=True)
 class SpinnSensorEntityDescription(SensorEntityDescription):
-    """Sensor description with a value extractor over the reported dict."""
+    """Sensor description with a value extractor.
+
+    ``value_fn`` reads the shadow ``reported`` dict by default; with
+    ``from_device=True`` it reads the REST device record instead
+    (``GET link/api/devices/{thing}`` — maintenance timestamps etc.).
+    """
 
     value_fn: Callable[[dict[str, Any]], Any]
+    from_device: bool = False
 
 
 SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
@@ -205,6 +225,34 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         entity_registry_enabled_default=False,
         value_fn=lambda d: _int(d, "AirPressure"),
     ),
+    # --- maintenance history (REST device record, docs/PROTOCOL.md §6) ---
+    SpinnSensorEntityDescription(
+        key="last_cleaning_at",
+        translation_key="last_cleaning",
+        icon="mdi:spray-bottle",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        from_device=True,
+        value_fn=lambda d: _timestamp(d, "last_cleaning_at"),
+    ),
+    SpinnSensorEntityDescription(
+        key="last_descaling_at",
+        translation_key="last_descaling",
+        icon="mdi:water-percent",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        from_device=True,
+        value_fn=lambda d: _timestamp(d, "last_descaling_at"),
+    ),
+    SpinnSensorEntityDescription(
+        key="last_water_filter_changing_at",
+        translation_key="last_filter_change",
+        icon="mdi:air-filter",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        from_device=True,
+        value_fn=lambda d: _timestamp(d, "last_water_filter_changing_at"),
+    ),
 )
 
 
@@ -214,7 +262,41 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: SpinnCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(SpinnSensor(coordinator, desc) for desc in SENSORS)
+    async_add_entities([
+        *(SpinnSensor(coordinator, desc) for desc in SENSORS),
+        SpinnRecipeCatalogSensor(coordinator),
+    ])
+
+
+class SpinnRecipeCatalogSensor(SpinnEntity, SensorEntity):
+    """Every recipe the machine can make (state = count; list in attributes).
+
+    Feeds the recipe editor card: library + custom recipes + specials (server)
+    and the app's milk guides. The big attributes are excluded from the recorder.
+    """
+
+    _attr_icon = "mdi:book-open-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _unrecorded_attributes = frozenset({"recipes", "cookbook"})
+    entity_description = SensorEntityDescription(key="recipe_catalog", translation_key="recipe_catalog")
+
+    def __init__(self, coordinator: SpinnCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.thing}_recipe_catalog"
+
+    @property
+    def native_value(self) -> int | None:
+        return len(self.coordinator.catalog) if self.coordinator.catalog else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "recipes": self.coordinator.catalog,
+            "cookbook": [
+                {k: c.get(k) for k in ("slot", "role", "recipe_id", "name")}
+                for c in self.coordinator.cookbook
+            ],
+        }
 
 
 class SpinnSensor(SpinnEntity, SensorEntity):
@@ -231,4 +313,6 @@ class SpinnSensor(SpinnEntity, SensorEntity):
 
     @property
     def native_value(self) -> Any:
-        return self.entity_description.value_fn(self.coordinator.data or {})
+        desc = self.entity_description
+        source = self.coordinator.device if desc.from_device else self.coordinator.data
+        return desc.value_fn(source or {})

@@ -1,0 +1,114 @@
+brew_recipe:
+  name: Brew recipe once
+  description: >-
+    Brew any recipe once — installed or not, including specials and milk drinks —
+    optionally adjusted. Uses the machine's temporary slot, so your cookbook is
+    not changed. Actuates the machine: have a cup in place.
+  fields:
+    recipe_id:
+      name: Recipe
+      description: Recipe id from the Recipe catalog sensor's `recipes` attribute.
+      required: true
+      selector:
+        text:
+    strength_g:
+      name: Strength
+      description: Coffee dose in grams (clamped to the recipe's range).
+      selector:
+        number: { min: 5, max: 16, step: 0.5, unit_of_measurement: g, mode: slider }
+    size_ml:
+      name: Size
+      description: Drink size in millilitres (clamped to the recipe's range).
+      selector:
+        number: { min: 20, max: 600, step: 1, unit_of_measurement: ml, mode: box }
+    balance_pct:
+      name: Water balance
+      description: Espresso/water balance for Americano-style recipes.
+      selector:
+        number: { min: 25, max: 75, step: 1, unit_of_measurement: "%", mode: slider }
+    coffee_first:
+      name: Coffee first
+      description: Pour coffee before the water (Americano-style recipes).
+      selector:
+        boolean:
+    device_id:
+      name: Machine
+      description: Only needed when more than one Spinn is set up.
+      selector:
+        device: { integration: spinn }
+
+save_recipe:
+  name: Save custom recipe
+  description: >-
+    Save an adjusted copy of a recipe to your Spinn account, optionally
+    installing it into a cookbook slot (0-3 user slots, 4/5/6 the tall/medium/small
+    cup buttons). Does not brew.
+  fields:
+    base_recipe_id:
+      name: Base recipe
+      required: true
+      selector:
+        text:
+    name:
+      name: Name
+      required: true
+      example: "Morning mug"
+      selector:
+        text:
+    slot:
+      name: Install in slot
+      selector:
+        number: { min: 0, max: 6, step: 1, mode: box }
+    strength_g:
+      name: Strength
+      selector:
+        number: { min: 5, max: 16, step: 0.5, unit_of_measurement: g, mode: slider }
+    size_ml:
+      name: Size
+      selector:
+        number: { min: 20, max: 600, step: 1, unit_of_measurement: ml, mode: box }
+    balance_pct:
+      name: Water balance
+      selector:
+        number: { min: 25, max: 75, step: 1, unit_of_measurement: "%", mode: slider }
+    coffee_first:
+      name: Coffee first
+      selector:
+        boolean:
+    device_id:
+      name: Machine
+      selector:
+        device: { integration: spinn }
+
+install_recipe:
+  name: Install recipe in slot
+  description: Put an existing recipe into a cookbook slot (0-6). Does not brew.
+  fields:
+    recipe_id:
+      name: Recipe
+      required: true
+      selector:
+        text:
+    slot:
+      name: Slot
+      required: true
+      selector:
+        number: { min: 0, max: 6, step: 1, mode: box }
+    device_id:
+      name: Machine
+      selector:
+        device: { integration: spinn }
+
+delete_recipe:
+  name: Delete custom recipe
+  description: Delete one of your own custom recipes (not stock ones, and not one that's installed in a slot).
+  fields:
+    recipe_id:
+      name: Recipe
+      required: true
+      selector:
+        text:
+    device_id:
+      name: Machine
+      selector:
+        device: { integration: spinn }

@@ -105,6 +105,55 @@ Base `https://iot.spinn.com/` unless noted. (`Api.init(marketPlaceUrl, iotUrl)` 
 `PUT recipe/api/cookbook/slot` · `.../product` · `.../temporary-slot` · `GET recipe/api/recipes/shared/{id}` ·
 POST/DELETE `recipe/api/recipes[/{id}]`. → **cookbook slots are the recipe numbers** the brew commands select.
 
+> **[V] Live-verified 2026-11-17 (read-only GETs).** Both reads live on `iot.spinn.com` and **404 without
+> `?thing_name=<thing>`**:
+> - `GET recipe/api/cookbook?thing_name=…` → `{id, thing_name, roaster_settings, created_at, updated_at,
+>   slots: [{recipe_id, recipe_product_id, status, recipe_params?}, …]}` — 8 slots, matching the
+>   shadow's 8-entry `recipes` array.
+> - `GET recipe/api/recipes?thing_name=…[&all=true]` → recipe records. Without `all`: the account
+>   **library** (stock + the user's custom copies; 21 on the test account). `all=true` adds the
+>   `type:"technical"` **Specials** (Affogato, Iced Cappuccino, Cafe Romano, Guillermo, Cafe Barraquito,
+>   Pumpkin Spice, Holiday Drink, Espresso Martini, Moonlight Fomo) plus an internal "Drying Recipe"
+>   (31 total). Each record has `id, name, slug, type` (`spinn`/`custom`/`technical`), `parent_name`
+>   (custom copies), `image_url`, `drink_size` (ml), `shots`, `cooldown_machine` (1 = cold),
+>   `special_params {cup_size_ml, release_notes, required_items[{text,img}]}`, a **`slider`** object with
+>   the user-editable ranges (`coffee_weight {min,max}` in 0.1 g, `volume_extraction {min,max}` ml,
+>   `water_balance {min,max}` %, `coffee_order`/`cooldown_machine` booleans), and ~90 derived brewer
+>   parameters. `*_float` fields are the position within the slider range (e.g. Espresso 🚀
+>   `coffee_strength_float` = (110−90)/(160−90) = 0.2857).
+> - **Milk drinks** (Latte, Cappuccino, Flat White, Cortado, Macchiato, Mocha, Vanilla Latte) are not on
+>   the server: the app hard-codes them (`RecipesRepository.milkRecipes`) as a ristretto shot plus
+>   frother instructions.
+> - `GET recipe/api/recipes/{id}` and the `www.spinn.com/api/` base both 404.
+>
+> **[C] Slot layout** (`RecipesRepository`, `Cookbook`): the brew byte is the **0-based** cookbook index
+> (`Cookbook.indexOf` → `PREPARE_RECIPE`+index), equal to the shadow `RecipeNumber`.
+>
+> | index | role | app constant |
+> |---|---|---|
+> | 0–3 | user slots (`Cookbook.userSlots` = first 4; the 4 dots beside the panel's person icon) | — |
+> | 4 | tall cup button | `COFFEE_SLOT` |
+> | 5 | medium cup button | `LUNGO_SLOT` |
+> | 6 | small cup button | `ESPRESSO_SLOT` |
+> | 7 | temporary one-off slot | `TEMP_SLOT` |
+>
+> To brew a recipe that isn't installed, the app `PUT recipe/api/cookbook/temporary-slot`s it, then sends
+> `PREPARE_RECIPE` + `07`. (The earlier live brew of byte `05` therefore poured slot 5 = the medium-button
+> recipe.)
+>
+> **Write bodies** (these change the account and sync to the machine; `[V]` = exercised live and reverted):
+> - **[V]** `POST recipe/api/recipes` `CreateCustomRecipeBody {thing_name, recipe_slug, name,
+>   coffee_strength_float, water_level_float, water_balance_float?, coffee_order?}` — a custom copy of the
+>   base recipe `recipe_slug`; the server derives every brewer parameter from the floats (verified: a Lungo
+>   copy with `water_level_float` 0.20 → 0.45 came back with volume 86 → 107 ml, `drink_size` 77 → 100).
+> - **[C]** `PUT recipe/api/cookbook/slot` `UpdateCookbookBody {thing_name, slot, recipe_id}` (the app sends
+>   only these three) — install a recipe into a slot.
+> - **[V]** `PUT recipe/api/cookbook/temporary-slot` `{thing_name, recipe_id, water_level_float?,
+>   coffee_strength_float?, water_balance_float?, coffee_order?}` — one-off, optionally adjusted; returns
+>   `completed` at once and leaves slots 0–6 untouched.
+> - **[C]** `POST recipe/api/cookbook/reset` `{thing_name, slot}` · **[V]** `DELETE recipe/api/recipes/{id}` ·
+>   `GET recipe/api/products/{product_id}/sliders` (per-coffee slider overrides).
+
 Other interfaces present: `ProductsFunctionsApi, OrderFunctionsApi, UserFunctionsApi,
 NotificationsFunctionsApi, RoasterFunctionsApi, MarketplaceFunctionsApi, IotWithoutAuthFunctionsApi`.
 

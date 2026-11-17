@@ -9,7 +9,7 @@ prefers a real installed `dizzycoffee` and only adds this copy to `sys.path` whe
 the library isn't otherwise importable.
 
 Only the modules the integration uses are bundled: `__init__.py`, `api.py`,
-`connection.py`, `commands.py` (the read path reuses `connection.build` directly,
+`connection.py`, `commands.py`, `recipes.py` (the read path reuses `connection.build` directly,
 so `shadow.py`/`cli.py`/`config.py` aren't needed here).
 
 ## Re-syncing after changing the real client
@@ -17,14 +17,14 @@ so `shadow.py`/`cli.py`/`config.py` aren't needed here).
 Keep these files identical to the originals:
 
 ```bash
-cp dizzycoffee/{__init__,api,connection,commands}.py \
+cp dizzycoffee/{__init__,api,connection,commands,recipes}.py \
    custom_components/spinn/_vendor/dizzycoffee/
 ```
 
 Verify:
 
 ```bash
-for f in __init__ api connection commands; do
+for f in __init__ api connection commands recipes; do
   diff -q dizzycoffee/$f.py custom_components/spinn/_vendor/dizzycoffee/$f.py
 done
 ```
