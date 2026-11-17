@@ -51,6 +51,14 @@ BINARY_SENSORS: tuple[SpinnBinarySensorEntityDescription, ...] = (
         is_on_fn=lambda d: (d.get("MachineStatus") == "PREPAREDRINK") if d.get("MachineStatus") else None,
     ),
     SpinnBinarySensorEntityDescription(
+        key="cleaning",
+        translation_key="cleaning",
+        device_class=BinarySensorDeviceClass.RUNNING,
+        icon="mdi:spray-bottle",
+        # CLEANING = rinse/clean cycle; EXPELL = puck/grounds expulsion.
+        is_on_fn=lambda d: (d.get("MachineStatus") in ("CLEANING", "EXPELL")) if d.get("MachineStatus") else None,
+    ),
+    SpinnBinarySensorEntityDescription(
         key="error",
         translation_key="error",
         device_class=BinarySensorDeviceClass.PROBLEM,

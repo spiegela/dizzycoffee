@@ -55,11 +55,16 @@
       "no_descale_counter": { "name": "Cups since descale" },
       "coldbrew_counter": { "name": "Cold brew counter" },
       "wifi_rssi": { "name": "Wi-Fi signal" },
-      "air_pressure": { "name": "Air pressure" }
+      "air_pressure": { "name": "Air pressure" },
+      "last_cleaning": { "name": "Last cleaning" },
+      "last_descaling": { "name": "Last descaling" },
+      "last_filter_change": { "name": "Last filter change" },
+      "recipe_catalog": { "name": "Recipe catalog" }
     },
     "binary_sensor": {
       "connected": { "name": "Connected" },
       "brewing": { "name": "Brewing" },
+      "cleaning": { "name": "Cleaning" },
       "error": { "name": "Error" }
     },
     "button": {
