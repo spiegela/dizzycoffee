@@ -119,6 +119,8 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfVolume.MILLILITERS,
         device_class=SensorDeviceClass.VOLUME_STORAGE,
         state_class=SensorStateClass.MEASUREMENT,
+        # Home Assistant converts to the user's units (fl. oz in US units).
+        suggested_display_precision=0,
         value_fn=lambda d: _int(d, "WaterVolume"),
     ),
     SpinnSensorEntityDescription(
@@ -183,7 +185,9 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         key="ShotCount",
         translation_key="shot_count",
         icon="mdi:counter",
-        state_class=SensorStateClass.TOTAL_INCREASING,
+        # Not a lifetime total: it reads 1 on a machine with 2,137 servings
+        # (docs/PROTOCOL.md §6). Lifetime drinks are the Servings sensor.
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: _int(d, "ShotCount"),
     ),
     # --- maintenance counters ---

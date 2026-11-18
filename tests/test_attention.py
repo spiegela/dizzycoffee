@@ -62,8 +62,9 @@ def test_bin_fill_from_space_left() -> None:
     assert attention.waste_fill({"DripTrayCapacity": "-5"}, "DripTrayCapacity") == 1.0
     assert attention.waste_fill({}, "DripTrayCapacity") is None
     assert attention.waste_fill({"DripTrayCapacity": "?"}, "DripTrayCapacity") is None
-    # A bigger maximum on another model doesn't go negative.
-    assert attention.waste_fill({"ResidueBinCapacity": "120"}, "ResidueBinCapacity") == 0.0
+    # Above an empty bin's value doesn't fit the model: unknown, not "0 % full".
+    assert attention.waste_fill({"ResidueBinCapacity": "120"}, "ResidueBinCapacity") is None
+    assert attention.waste_fill({"OtherCapacity": "5"}, "OtherCapacity") is None
 
 
 def test_bins_full_and_nearly_full_from_space_left() -> None:
@@ -93,6 +94,13 @@ async def test_bin_level_sensors(hass: HomeAssistant, coordinator) -> None:
     await hass.async_block_till_done()
     assert hass.states.get(grounds).state == "14"
     assert hass.states.get(tray).state == "90"
+
+    # A reading above an empty bin's value is shown as unknown, not as empty.
+    coordinator.async_set_updated_data({**coordinator.data, "DripTrayCapacity": "310"})
+    await hass.async_block_till_done()
+    assert hass.states.get(tray).state == "unknown"
+    coordinator.async_set_updated_data({**coordinator.data, "DripTrayCapacity": "30"})
+    await hass.async_block_till_done()
     state = hass.states.get("binary_sensor.kitchen_spinn_needs_attention")
     assert state.attributes["warnings"] == ["drip_tray_nearly_full"]
 

@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const CARD_VERSION = "0.3.5";
+const CARD_VERSION = "0.3.6";
 
 /* -------------------------------------------------------------- shared maps */
 
@@ -693,6 +693,7 @@ const SUFFIX = {
   drip_tray: ["sensor", "drip_tray"],
   drip_tray_level: ["sensor", "drip_tray_level"],
   shot_count: ["sensor", "shot_count"],
+  servings: ["sensor", "servings"],
   recipe_number: ["sensor", "recipe_number"],
   deep_clean_count: ["sensor", "cups_since_deep_clean", "no_deep_clean_counter"],
   descale_count: ["sensor", "cups_since_descale", "no_descale_counter"],
@@ -1128,23 +1129,33 @@ class SpinnMachineCard extends SpinnBase {
     const up = (id) => (stateStr(hass, id) || "").toUpperCase();
     const bf = FILL_FRACTION[up(e.beans)] ?? 1, wf = FILL_FRACTION[up(e.water)] ?? 1;
     // Bins: removed / FULL from the enum, otherwise % full from the level sensor.
+    // The % label only appears when the level is actually known.
     const binFill = (enumId, levelId) => {
       const s = up(enumId);
-      if (s === "REMOVED" || s === "EMPTYORREMOVED") return -1;
-      if (s === "FULL") return 1;
+      if (s === "REMOVED" || s === "EMPTYORREMOVED") return { frac: -1, note: " · removed" };
+      if (s === "FULL") return { frac: 1, note: " · full" };
       const pct = num(hass, levelId);
-      return pct !== undefined ? pct / 100 : WASTE_FRACTION[s] ?? 0;
+      if (pct !== undefined) return { frac: pct / 100, note: ` · ${Math.round(pct)}%` };
+      return { frac: WASTE_FRACTION[s] ?? 0, note: "" };
     };
-    const gf = binFill(e.grounds, e.grounds_level), tf = binFill(e.drip_tray, e.drip_tray_level);
-    const vol = num(hass, e.water_volume);
-    const shots = num(hass, e.shot_count);
-    const out = (f) => (f < 0 ? " · removed" : ` · ${Math.round(Math.min(1, f) * 100)}%`);
+    const g = binFill(e.grounds, e.grounds_level), t = binFill(e.drip_tray, e.drip_tray_level);
+    const gf = g.frac, tf = t.frac;
+    // Water volume in the user's units (Home Assistant converts ml to fl. oz in US units).
+    const volObj = e.water_volume ? hass.states[e.water_volume] : undefined;
+    const volText = volObj && stateStr(hass, e.water_volume) !== undefined
+      ? (typeof hass.formatEntityState === "function"
+        ? hass.formatEntityState(volObj)
+        : `${Math.round(+volObj.state)} ${volObj.attributes.unit_of_measurement || "ml"}`)
+      : "";
+    const servings = num(hass, e.servings);
     root.querySelector(".meta").innerHTML =
       levelBar("Beans", bf, fillTone(bf)) +
-      levelBar("Water" + (vol !== undefined ? ` · ${vol} ml` : ""), wf, fillTone(wf)) +
-      levelBar("Grounds bin" + out(gf), gf < 0 ? 1 : gf, wasteTone(gf)) +
-      levelBar("Drip tray" + out(tf), tf < 0 ? 1 : tf, wasteTone(tf)) +
-      (shots !== undefined ? `<div class="muted" style="font-size:.78rem">${shots.toLocaleString()} shots brewed</div>` : "");
+      levelBar("Water" + (volText ? ` · ${esc(volText)}` : ""), wf, fillTone(wf)) +
+      levelBar("Grounds bin" + g.note, gf < 0 ? 1 : gf, wasteTone(gf)) +
+      levelBar("Drip tray" + t.note, tf < 0 ? 1 : tf, wasteTone(tf)) +
+      (servings !== undefined
+        ? `<div class="muted" style="font-size:.78rem">${servings.toLocaleString()} ${servings === 1 ? "drink" : "drinks"} made</div>`
+        : "");
 
     // ---- illustration: hopper level + status icons + lit brew button
     const beansG = root.querySelector(".beans");
@@ -1233,7 +1244,7 @@ class SpinnMachineCard extends SpinnBase {
       const when = last ? ago(last) : null;
       if (count === undefined && !when) return;
       const parts = [];
-      if (count !== undefined) parts.push(`${count.toLocaleString()} ${unit}`);
+      if (count !== undefined) parts.push(unit ? `${count.toLocaleString()} ${unit}` : count.toLocaleString());
       if (when) parts.push(when);
       const bar = every > 0 && count !== undefined
         ? `<div class="mbar"><div class="tone-${due ? "busy" : count / every >= 0.8 ? "busy" : "ok"}" style="width:${Math.min(100, (count / every) * 100)}%"></div></div>`
@@ -1246,7 +1257,8 @@ class SpinnMachineCard extends SpinnBase {
     const cleanLabel = cleaning ? "Deep clean · running" : "Deep clean";
     row(UI.clean, cleanLabel, e.deep_clean_count, deepN, deepEvery, deepDue, e.last_cleaning);
     row(UI.descale, "Descale", e.descale_count, descN, descaleEvery, descDue, e.last_descaling);
-    row(UI.filter, "Water filter", e.filter_count, num(hass, e.filter_count), 0, false, e.last_filter, "uses");
+    // FilterCounter's unit is unknown (it's far above the drink count), so no label.
+    row(UI.filter, "Water filter", e.filter_count, num(hass, e.filter_count), 0, false, e.last_filter, "");
 
     const diag = [];
     const wl = stateStr(hass, e.water_line);
