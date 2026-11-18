@@ -30,6 +30,8 @@
 #
 # Environment: HA_CONFIG (config dir on the target, default /config), NO_RESTART=1,
 #              HA_URL, HA_TOKEN. kubectl uses your usual kubeconfig / KUBECONFIG.
+# With HA_URL set (token or not), it finishes by checking that Home Assistant
+# serves the card version from your checkout.
 #
 # To go back: redownload the integration in HACS / Marketplace, or move
 # <config>/.dizzycoffee/spinn.bak back to <config>/custom_components/spinn and restart.
@@ -152,6 +154,29 @@ elif any(e.get("state") != "loaded" for e in entries):
   fi
 }
 
+# The cards are served without a login, so this needs HA_URL but no token.
+check_cards() {
+  if [ -z "${HA_URL:-}" ]; then
+    echo "Tip: set HA_URL and the script checks which card version Home Assistant serves."
+    return 0
+  fi
+  command -v curl >/dev/null || return 0
+  local want got=""
+  want="$(sed -n 's/^CARD_VERSION = "\(.*\)"/\1/p' "$src/const.py")"
+  # Home Assistant may still be starting integrations; give it up to 2 minutes.
+  for _ in $(seq 1 30); do
+    got="$(curl -fsS --max-time 10 "${HA_URL%/}/spinn_cards/spinn-card.js" 2>/dev/null |
+      sed -n 's/^const CARD_VERSION = "\(.*\)";/\1/p' | head -n 1)"
+    [ -n "$got" ] && break
+    sleep 4
+  done
+  if [ "$got" = "$want" ]; then
+    echo "Home Assistant is serving cards v$got. Reload the dashboard page to pick them up."
+  else
+    echo "warning: expected cards v$want but Home Assistant serves ${got:-nothing} at /spinn_cards/spinn-card.js; it may not have restarted with the new files." >&2
+  fi
+}
+
 # ------------------------------------------------------------------ SSH mode
 deploy_ssh() {
   local host="${1:?usage: $0 ssh user@host [port]}" port="${2:-22}"
@@ -168,6 +193,7 @@ deploy_ssh() {
     else
       echo "No ha CLI on this host: restart Home Assistant yourself (Settings → System → Restart)."
     fi'
+  check_cards
 }
 
 # ----------------------------------------------------------- Kubernetes mode
@@ -270,8 +296,8 @@ deploy_k8s() {
 
   case "$restart" in
     none) echo "Not restarting. Restart Home Assistant to load it." ;;
-    api) restart_via_api ;;
-    pod) restart_pod ;;
+    api) restart_via_api; check_cards ;;
+    pod) restart_pod; check_cards ;;
   esac
 }
 
@@ -283,4 +309,4 @@ case "${1:-}" in
   -*) die "unknown option $1 (see --help)" ;;
   *) deploy_ssh "$@" ;;  # older form: scripts/deploy-to-ha.sh user@host [port]
 esac
-echo "Done. The cards are versioned, so a normal browser reload picks up card changes."
+echo "Done. If a dashboard still shows the old cards, reload the page (in the companion app, reset its frontend cache)."

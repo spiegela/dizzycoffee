@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const CARD_VERSION = "0.3.4";
+const CARD_VERSION = "0.3.5";
 
 /* -------------------------------------------------------------- shared maps */
 
@@ -677,6 +677,10 @@ function fireMoreInfo(el, entityId) {
   }));
 }
 
+// key -> [domain, entity-id suffix, translation key (when it differs from the suffix)].
+// Entities are found by translation key in the entity registry first, so a
+// renamed device (whose newer entities get a different id prefix) still works;
+// the id suffix is the fallback.
 const SUFFIX = {
   status: ["sensor", "machine_status"],
   process: ["sensor", "process_status"],
@@ -690,13 +694,13 @@ const SUFFIX = {
   drip_tray_level: ["sensor", "drip_tray_level"],
   shot_count: ["sensor", "shot_count"],
   recipe_number: ["sensor", "recipe_number"],
-  deep_clean_count: ["sensor", "cups_since_deep_clean"],
-  descale_count: ["sensor", "cups_since_descale"],
+  deep_clean_count: ["sensor", "cups_since_deep_clean", "no_deep_clean_counter"],
+  descale_count: ["sensor", "cups_since_descale", "no_descale_counter"],
   filter_count: ["sensor", "filter_counter"],
   last_cleaning: ["sensor", "last_cleaning"],
   last_descaling: ["sensor", "last_descaling"],
   last_filter: ["sensor", "last_filter_change"],
-  wifi: ["sensor", "wi_fi_signal"],
+  wifi: ["sensor", "wi_fi_signal", "wifi_rssi"],
   catalog: ["sensor", "recipe_catalog"],
   connected: ["binary_sensor", "connected"],
   brewing: ["binary_sensor", "brewing"],
@@ -715,11 +719,35 @@ function detectPrefix(hass) {
   return hit.slice("sensor.".length, -"_machine_status".length);
 }
 
+// The Spinn machine a card follows: the device of `prefix`'s status sensor if a
+// prefix is configured, else the first Spinn device in the entity registry.
+function spinnDevice(hass, config) {
+  const reg = hass.entities || {};
+  if (config.prefix) {
+    const e = reg[`sensor.${config.prefix}_machine_status`];
+    if (e && e.device_id) return e.device_id;
+  }
+  const status = Object.values(reg).find((e) => e.platform === "spinn" && e.translation_key === "machine_status");
+  return status ? status.device_id : undefined;
+}
+
 function resolveEntities(hass, config) {
-  const prefix = config.prefix || detectPrefix(hass);
+  const reg = hass.entities || {};
+  const device = spinnDevice(hass, config);
+  const byKey = {};
+  if (device) {
+    for (const e of Object.values(reg)) {
+      if (e.platform === "spinn" && e.device_id === device && e.translation_key) {
+        byKey[`${e.entity_id.split(".")[0]}:${e.translation_key}`] = e.entity_id;
+      }
+    }
+  }
+  const statusId = byKey["sensor:machine_status"];
+  const prefix = config.prefix
+    || (statusId ? statusId.slice("sensor.".length, -"_machine_status".length) : detectPrefix(hass));
   const out = {};
-  for (const [key, [domain, suffix]] of Object.entries(SUFFIX)) {
-    const id = config[key] || (prefix ? `${domain}.${prefix}_${suffix}` : null);
+  for (const [key, [domain, suffix, tk]] of Object.entries(SUFFIX)) {
+    const id = config[key] || byKey[`${domain}:${tk || suffix}`] || (prefix ? `${domain}.${prefix}_${suffix}` : null);
     out[key] = id && hass.states[id] ? id : (config[key] || null);
   }
   return out;
@@ -847,6 +875,7 @@ const BASE_CSS = `
 `;
 
 class SpinnBase extends HTMLElement {
+  static get version() { return CARD_VERSION; }
   setConfig(config) {
     this._config = config || {};
     this._built = false;
@@ -1862,6 +1891,17 @@ class SpinnRecipeEditorCard extends SpinnBase {
 }
 
 /* --------------------------------------------------------------- register */
+{
+  // If another copy of the cards got here first (e.g. a leftover dashboard
+  // resource), it wins and this one is ignored; say so instead of failing quietly.
+  const loaded = customElements.get("spinn-machine-card");
+  if (loaded && loaded.version !== CARD_VERSION) {
+    console.warn(
+      `Spinn cards v${CARD_VERSION} weren't used: v${loaded.version || "(older)"} was already loaded. ` +
+      "Remove any Spinn entry under Settings → Dashboards → ⋮ → Resources (the integration loads " +
+      "the cards itself), then reload the page.");
+  }
+}
 if (!customElements.get("spinn-machine-card")) customElements.define("spinn-machine-card", SpinnMachineCard);
 if (!customElements.get("spinn-recipe-card")) customElements.define("spinn-recipe-card", SpinnRecipeCard);
 if (!customElements.get("spinn-recipe-editor-card")) customElements.define("spinn-recipe-editor-card", SpinnRecipeEditorCard);
