@@ -30,19 +30,20 @@ pytest_plugins = "pytest_homeassistant_custom_component"
 
 THING = "spinn-thing-0123456789abcdef"
 
-# An idle, healthy machine (all shadow values are strings, as on the wire).
+# An idle, healthy machine, as a live one reports it right after the hopper is
+# filled and both bins emptied (all shadow values are strings, as on the wire).
 SHADOW: dict[str, Any] = {
     "MachineStatus": "ACTIVE",
     "ProcessStatus": "UNDEFINED",
     "connected": "true",
-    "HopperReservoir": "OK",
-    "WaterTank": "OK",
+    "HopperReservoir": "LEVEL2",
+    "WaterTank": "FULL",
     "WaterVolume": "750",
     "WaterLineStatus": "WL_CONNECTED",
-    "ResidueBin": "EMPTY",
-    "ResidueBinCapacity": "0",
-    "DripTray": "EMPTY",
-    "DripTrayCapacity": "0",
+    "ResidueBin": "PLACED",
+    "ResidueBinCapacity": "100",  # space left; counts down as the bin fills
+    "DripTray": "PLACED",
+    "DripTrayCapacity": "300",
     "RecipeNumber": "5",
     "ShotCount": "1234",
     "NoDeepCleanCounter": "12",

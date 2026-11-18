@@ -66,6 +66,26 @@ def test_cli_stats_prints_both_endpoints(capsys) -> None:
     client.get_user_stats.assert_called_once_with("thing-1")
 
 
+def test_cli_watch_prints_snapshot_then_changes(capsys) -> None:
+    snapshot = {"state": {"reported": {"connected": "true", "DripTray": "PLACED", "DripTrayCapacity": "270"}}}
+    update = {  # update/documents envelope, as pushed while the tray is emptied
+        "previous": {"state": {"reported": {"DripTray": "PLACED", "DripTrayCapacity": "270", "WiFiRssi": "-60"}}},
+        "current": {"state": {"reported": {"DripTray": "REMOVED", "DripTrayCapacity": "300", "WiFiRssi": "-60"}}},
+        "timestamp": 1, "version": 2,
+    }
+    assert cli._reported(update) == update["current"]["state"]["reported"]
+
+    cli._print_update(snapshot, raw=False)
+    cli._print_update(update, raw=False)
+    out = capsys.readouterr().out
+    assert "DripTrayCapacity     270" in out
+    assert "watching for changes" in out
+    assert "DripTray             PLACED -> REMOVED" in out
+    assert "DripTrayCapacity     270 -> 300" in out
+    assert "WiFiRssi" not in out  # unchanged values aren't repeated
+    assert "more fields" not in out.split("watching for changes")[1]
+
+
 # --- MQTT plumbing -----------------------------------------------------------
 
 

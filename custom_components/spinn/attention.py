@@ -5,9 +5,13 @@ binary sensor, the brew-failure hint and diagnostics. The level rules mirror the
 machine card (``frontend/spinn-card.js``) so the dashboard and automations agree:
 
 * Beans / water: empty (``EMPTY``, ``EMPTYORREMOVED``, ``REMOVED``) needs a refill;
-  ``LEVEL0`` is low.
-* Grounds bin / drip tray: ``FULL`` or removed needs emptying / putting back;
-  ``LEVEL2`` is nearly full.
+  ``LEVEL0`` is low. The hopper reads ``LEVEL0`` < ``LEVEL1`` < ``LEVEL2`` (full).
+* Grounds bin / drip tray: the ``ResidueBin`` / ``DripTray`` enum mostly says
+  whether the bin is in place (``PLACED`` / ``REMOVED``); how full it is comes
+  from ``ResidueBinCapacity`` / ``DripTrayCapacity``, the space left, which
+  counts down as the bin fills and resets to 100 / 300 when it's emptied
+  (docs/PROTOCOL.md §6). Full (space left 0, or the enum says ``FULL``) or
+  removed needs emptying / putting back; 80 % full is nearly full.
 * Deep clean / descale: due once the cups-since counter reaches its interval.
 
 ``reasons`` are things to do now (they turn the binary sensor on); ``warnings``
@@ -19,6 +23,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import DEFAULT_DEEP_CLEAN_EVERY, DEFAULT_DESCALE_EVERY
+
+# Space left in each bin right after emptying (live-observed). A higher value
+# seen on another model is treated as its maximum.
+CAPACITY_MAX: dict[str, int] = {"ResidueBinCapacity": 100, "DripTrayCapacity": 300}
+NEARLY_FULL = 0.8
 
 _EMPTY = {"EMPTY", "EMPTYORREMOVED", "REMOVED"}
 _LOW = {"LEVEL0"}
@@ -72,6 +81,19 @@ def _count(data: dict[str, Any], key: str) -> int | None:
         return None
 
 
+def waste_fill(data: dict[str, Any] | None, capacity_key: str) -> float | None:
+    """How full a bin is (0.0 empty .. 1.0 full) from its space-left counter.
+
+    ``None`` when the counter is missing or not a number.
+    """
+    left = _count(data or {}, capacity_key)
+    if left is None:
+        return None
+    most = max(CAPACITY_MAX.get(capacity_key, left), left, 1)
+    # (most - left) / most rather than 1 - left / most: exact at the thresholds.
+    return min(1.0, max(0.0, (most - left) / most))
+
+
 def evaluate(
     data: dict[str, Any] | None,
     *,
@@ -93,13 +115,17 @@ def evaluate(
         elif level in _LOW:
             warnings.append(f"{name}_low")
 
-    for key, name in (("ResidueBin", "grounds_bin"), ("DripTray", "drip_tray")):
+    for key, capacity_key, name in (
+        ("ResidueBin", "ResidueBinCapacity", "grounds_bin"),
+        ("DripTray", "DripTrayCapacity", "drip_tray"),
+    ):
         level = _level(data, key)
+        fill = waste_fill(data, capacity_key)
         if level in _REMOVED:
             reasons.append(f"{name}_removed")
-        elif level == "FULL":
+        elif level == "FULL" or (fill is not None and fill >= 1):
             reasons.append(f"{name}_full")
-        elif level in _NEARLY_FULL:
+        elif level in _NEARLY_FULL or (fill is not None and fill >= NEARLY_FULL):
             warnings.append(f"{name}_nearly_full")
 
     for key, name, every in (

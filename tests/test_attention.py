@@ -53,6 +53,50 @@ def test_maintenance_due_at_threshold() -> None:
     assert result.reasons == ["descale_due"]
 
 
+def test_bin_fill_from_space_left() -> None:
+    # Space left counts down from 100 (grounds) / 300 (drip tray) as the bins fill.
+    assert attention.waste_fill(SHADOW, "ResidueBinCapacity") == 0.0
+    assert attention.waste_fill({"ResidueBinCapacity": "86"}, "ResidueBinCapacity") == 0.14
+    assert attention.waste_fill({"DripTrayCapacity": "270"}, "DripTrayCapacity") == 0.1
+    assert attention.waste_fill({"DripTrayCapacity": "0"}, "DripTrayCapacity") == 1.0
+    assert attention.waste_fill({"DripTrayCapacity": "-5"}, "DripTrayCapacity") == 1.0
+    assert attention.waste_fill({}, "DripTrayCapacity") is None
+    assert attention.waste_fill({"DripTrayCapacity": "?"}, "DripTrayCapacity") is None
+    # A bigger maximum on another model doesn't go negative.
+    assert attention.waste_fill({"ResidueBinCapacity": "120"}, "ResidueBinCapacity") == 0.0
+
+
+def test_bins_full_and_nearly_full_from_space_left() -> None:
+    result = attention.evaluate({**SHADOW, "ResidueBinCapacity": "20", "DripTrayCapacity": "61"})
+    assert result.reasons == []
+    assert result.warnings == ["grounds_bin_nearly_full"]  # 80 % full; the tray is 79.7 %
+
+    result = attention.evaluate({**SHADOW, "ResidueBinCapacity": "0", "DripTrayCapacity": "30"})
+    assert result.reasons == ["grounds_bin_full"]
+    assert result.warnings == ["drip_tray_nearly_full"]
+
+    # Removed wins over the counter; the enum's FULL still counts on its own.
+    result = attention.evaluate({**SHADOW, "ResidueBin": "REMOVED", "ResidueBinCapacity": "0", "DripTray": "FULL"})
+    assert result.reasons == ["grounds_bin_removed", "drip_tray_full"]
+
+
+async def test_bin_level_sensors(hass: HomeAssistant, coordinator) -> None:
+    grounds = "sensor.kitchen_spinn_grounds_bin_level"
+    tray = "sensor.kitchen_spinn_drip_tray_level"
+    assert hass.states.get(grounds).state == "0"
+    assert hass.states.get(grounds).attributes["unit_of_measurement"] == "%"
+    assert hass.states.get(tray).state == "0"
+
+    coordinator.async_set_updated_data(
+        {**coordinator.data, "ResidueBinCapacity": "86", "DripTrayCapacity": "30"}
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(grounds).state == "14"
+    assert hass.states.get(tray).state == "90"
+    state = hass.states.get("binary_sensor.kitchen_spinn_needs_attention")
+    assert state.attributes["warnings"] == ["drip_tray_nearly_full"]
+
+
 def test_machine_error_and_missing_values() -> None:
     assert attention.evaluate({"MachineStatus": "MACHINEERROR"}).reasons == ["machine_error"]
     assert attention.evaluate({}).reasons == []

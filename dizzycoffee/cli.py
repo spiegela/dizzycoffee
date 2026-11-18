@@ -8,6 +8,7 @@ import argparse
 import getpass
 import json
 import sys
+import time
 
 from .api import SpinnClient, SpinnError
 from .config import Config
@@ -126,8 +127,37 @@ def cmd_devices(cfg: Config, args) -> int:
 
 
 def _reported(doc: dict) -> dict:
+    """The reported state from a shadow/get reply or an update/documents message."""
+    if isinstance(doc.get("current"), dict):  # update/documents: {previous, current}
+        doc = doc["current"]
     state = doc.get("state") or {}
     return state.get("reported") or state or doc
+
+
+def _short(value, width: int = 60) -> str:
+    text = json.dumps(value) if not isinstance(value, str) else value
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _print_changes(doc: dict) -> None:
+    """For an update/documents message, print each reported value that changed."""
+    before = _reported(doc.get("previous") or {})
+    after = _reported(doc)
+    stamp = time.strftime("%H:%M:%S")
+    for key in sorted(set(before) | set(after)):
+        if before.get(key) != after.get(key):
+            print(f"{stamp}  {key:20} {_short(before.get(key, '(none)'))} -> {_short(after.get(key, '(none)'))}")
+
+
+def _print_update(doc: dict, raw: bool) -> None:
+    """--watch: the first snapshot in full, then only what changed."""
+    if isinstance(doc.get("current"), dict):
+        _print_changes(doc)
+        if raw:
+            print(json.dumps(doc, indent=2))
+    else:
+        _print_state(doc, raw)
+        print("--- watching for changes (Ctrl-C to stop)")
 
 
 def _print_state(doc: dict, raw: bool) -> None:
@@ -152,7 +182,7 @@ def cmd_state(cfg: Config, args) -> int:
     try:
         if args.watch:
             print("Watching live state. Ctrl-C to stop.\n")
-            sh.watch(lambda d: (_print_state(d, args.raw), print("---")))
+            sh.watch(lambda d: _print_update(d, args.raw))
         else:
             _print_state(sh.get_snapshot(), args.raw)
     except KeyboardInterrupt:
