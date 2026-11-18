@@ -512,9 +512,9 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_power(self, on: bool) -> None:
         """Wake (SWITCH_ON) or switch off (SWITCH_OFF) the machine.
 
-        Opcodes are confirmed from the app (docs/PROTOCOL.md §5) but their
-        effects aren't live-verified yet; the Power switch that calls this is
-        disabled by default until they are. Switching off is refused mid-task.
+        Live-verified (docs/PROTOCOL.md §5): off puts the machine to sleep
+        (``INACTIVE``) and it stays connected, so on can wake it remotely.
+        Switching off is refused mid-task.
         """
         from dizzycoffee.commands import DeviceCommand  # lazy
 

@@ -1,6 +1,6 @@
 # Copy to ~/.config/dizzycoffee/config.toml (NOT into this repo) and edit, or
 # set the matching DIZZY_* environment variables. Everything here is optional;
-# the defaults are the values the official app ships with.
+# the defaults below are what the client uses if you leave them out.
 #
 # Your password is NEVER read from here — `login` prompts for it and sends it
 # straight to Spinn over HTTPS. Only the resulting session token is stored
@@ -9,4 +9,7 @@
 # email    = "you@example.com"        # convenience default for `login`
 # mp_base      = "https://www.spinn.com/api/"
 # iot_base     = "https://iot.spinn.com/"
-# iot_endpoint = "a1gzieuy3t1932.iot.us-east-1.amazonaws.com"
+# iot_endpoint = "a1gzieuy3t1932-ats.iot.us-east-1.amazonaws.com"
+#   ^ the ATS endpoint. The app ships the legacy one (no "-ats"), whose server
+#     certificate chains to a root modern trust stores no longer carry, so TLS
+#     fails against it (docs/PROTOCOL.md §1).
