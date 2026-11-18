@@ -407,6 +407,19 @@ To choose a drawing yourself, set `icon` on a favorite or recipe tile: `espresso
 If you ever disable auto-registration, add the module manually as a dashboard resource:
 `/spinn_cards/spinn-card.js` (JavaScript module).
 
+**Cards look unchanged after an update?**
+1. Reload the dashboard page: the cards are loaded once per page load, and Home Assistant restarting
+   doesn't reload open pages. In the companion app, reset its frontend cache.
+2. Compare versions. The browser console prints `SPINN-CARDS v…` for the copy in use, and
+   `https://<your Home Assistant>/spinn_cards/spinn-card.js` shows the version Home Assistant serves
+   (`CARD_VERSION` near the top). If even that is old, Home Assistant hasn't restarted with the
+   new files.
+3. If the console warns that an older copy was already loaded, remove any Spinn entry under
+   **Settings → Dashboards → ⋮ → Resources**: the integration loads the cards itself.
+
+The cards find their entities through the entity registry, so renaming the device or its entities
+doesn't break them. With more than one Spinn, `prefix` picks the machine.
+
 ### Options
 
 **Settings → Devices & Services → Spinn → Configure** sets how many cups go between deep cleans
@@ -516,7 +529,8 @@ scripts/deploy-to-ha.sh ssh root@homeassistant.local        # add a port if it i
 
 Either way the files land in `/config/custom_components/spinn` (`HA_CONFIG` if your config lives
 elsewhere), the copy they replace is kept in `/config/.dizzycoffee/spinn.bak`, and `NO_RESTART=1`
-skips the restart. Redownloading in HACS / Marketplace puts the released version back.
+skips the restart. With `HA_URL` set, the script finishes by checking that Home Assistant serves the
+card version from your checkout; after that, reload the dashboard page. Redownloading in HACS / Marketplace puts the released version back.
 
 ### Guidelines
 
