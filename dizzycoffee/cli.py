@@ -162,6 +162,28 @@ def cmd_state(cfg: Config, args) -> int:
     return 0
 
 
+def cmd_stats(cfg: Config, args) -> int:
+    """Print the account's usage stats endpoints as JSON (read-only).
+
+    Their response shapes aren't documented yet (docs/PROTOCOL.md §3); this
+    prints exactly what Spinn returns so the fields can be mapped.
+    """
+    client, devices = _get_devices_with_refresh(cfg)
+    thing = _pick_device(devices, args.thing)["thing_name"]
+    for label, fetch in (
+        ("stats/api/user-stats", client.get_user_stats),
+        ("average-consumer/api/coffee-backlog", client.get_coffee_backlog),
+    ):
+        print(f"== {label}")
+        try:
+            print(json.dumps(fetch(thing), indent=2, sort_keys=True))
+        except SpinnError as e:
+            print(f"  error: {e}")
+            if e.body:
+                print(f"  {e.body}")
+    return 0
+
+
 # --------------------------------------------------------------------------
 # commands that ACTUATE the machine (opt-in, confirmation-gated)
 # --------------------------------------------------------------------------
@@ -301,6 +323,10 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--watch", action="store_true", help="Stream live updates until Ctrl-C.")
     ps.add_argument("--raw", action="store_true", help="Also dump the full shadow JSON.")
     ps.set_defaults(func=cmd_state)
+
+    pst = sub.add_parser("stats", help="Print your account's coffee stats as JSON (read-only).")
+    pst.add_argument("--thing", help="thing_name, if you have more than one machine.")
+    pst.set_defaults(func=cmd_stats)
 
     # --- actuating commands (opt-in; each gated by confirmation / --yes) ---
     pw = sub.add_parser("power", help="[ACTUATES] Switch the machine on or off.")

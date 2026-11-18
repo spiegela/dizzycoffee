@@ -49,8 +49,13 @@ from .const import (
     BREW_CONFIRM_TIMEOUT,
     BREW_POLL_INTERVAL,
     BUSY_STATUSES,
+    COMMAND_STEP_GAP,
+    CONF_DEEP_CLEAN_EVERY,
+    CONF_DESCALE_EVERY,
     CONF_THING_NAME,
     CONF_TOKEN,
+    DEFAULT_DEEP_CLEAN_EVERY,
+    DEFAULT_DESCALE_EVERY,
     DEFAULT_IOT_BASE,
     DEFAULT_IOT_ENDPOINT,
     DEFAULT_MP_BASE,
@@ -98,8 +103,13 @@ class _ShadowStream:
     Built with ``dizzycoffee.connection.build`` (the package's shared mutual-TLS
     builder — same thing ``ReadOnlyShadow`` uses). Subscribes to
     ``shadow/update/documents`` (push) and ``shadow/get/accepted`` (snapshot
-    replies). It never publishes to ``<thing>/host``; the only publish is the
-    passive empty ``shadow/get``.
+    replies). The stream itself never publishes to ``<thing>/host``; its only
+    publish is the passive empty ``shadow/get``. The coordinator's command path
+    may publish over the same connection through
+    ``DeviceCommander.from_connection`` (see ``_send_blocking``).
+
+    ``connected`` is False while awscrt reports the connection interrupted, so
+    commands are never handed to a connection that would queue them for later.
     """
 
     def __init__(
@@ -139,13 +149,34 @@ class _ShadowStream:
         except Exception:  # noqa: BLE001
             self._snapshots.put({})
 
+    def _on_interrupted(self, connection, error, **_kw) -> None:  # awscrt thread
+        self.connected = False
+        _LOGGER.debug("Spinn MQTT connection interrupted: %s", error)
+
+    def _on_resumed(self, connection, return_code, session_present, **_kw) -> None:  # awscrt thread
+        # A clean session drops subscriptions; the next refresh rebuilds the
+        # stream (connected stays False) unless the broker kept the session.
+        self.connected = bool(session_present) and self._conn is not None
+        _LOGGER.debug("Spinn MQTT connection resumed (session_present=%s)", session_present)
+
+    @property
+    def connection(self):
+        """The live awscrt connection, or None while down or interrupted."""
+        return self._conn if self.connected else None
+
     def connect(self, timeout: float = _CONNECT_TIMEOUT) -> None:
         """Connect and (re)subscribe. Blocking — call from the executor."""
         from awscrt import mqtt  # lazy
         from dizzycoffee import connection
 
         qos1 = mqtt.QoS.AT_LEAST_ONCE
-        self._conn = connection.build(self._endpoint, self._cert, self._key)
+        self._conn = connection.build(
+            self._endpoint,
+            self._cert,
+            self._key,
+            on_interrupted=self._on_interrupted,
+            on_resumed=self._on_resumed,
+        )
         self._conn.connect().result(timeout)
         self._conn.subscribe(f"{self._base}/get/accepted", qos1, self._on_get_accepted)[0].result(timeout)
         self._conn.subscribe(f"{self._base}/update/documents", qos1, self._on_documents)[0].result(timeout)
@@ -212,6 +243,32 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # and the raw server records by id (needed for slider maths on writes).
         self.catalog: list[dict[str, Any]] = []
         self._library: dict[str, dict[str, Any]] = {}
+        # Serialises commands, so a double-tapped Brew can't send two brews (the
+        # second waits, then sees the machine busy). Stop doesn't take it.
+        self._command_lock = asyncio.Lock()
+
+    # ------------------------------------------------------------ maintenance
+    def _interval(self, key: str, default: int) -> int:
+        try:
+            return max(0, int(float(self.entry.options.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    @property
+    def deep_clean_every(self) -> int:
+        """Cups between deep cleans (options; 0 = no reminder)."""
+        return self._interval(CONF_DEEP_CLEAN_EVERY, DEFAULT_DEEP_CLEAN_EVERY)
+
+    @property
+    def descale_every(self) -> int:
+        """Cups between descales (options; 0 = no reminder)."""
+        return self._interval(CONF_DESCALE_EVERY, DEFAULT_DESCALE_EVERY)
+
+    def current_attention(self) -> attention.Attention:
+        """What needs doing now, using the configured maintenance intervals."""
+        return attention.evaluate(
+            self.data, deep_clean_every=self.deep_clean_every, descale_every=self.descale_every
+        )
 
     # ------------------------------------------------------------------ reads
     async def _async_update_data(self) -> dict[str, Any]:
@@ -379,10 +436,15 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         reports ``PREPAREDRINK``; raises if it reports an error or doesn't start
         within ``BREW_CONFIRM_TIMEOUT``.
         """
+        async with self._command_lock:
+            self._ensure_online()
+            self._ensure_idle("brew")
+            await self._brew_locked(slot)
+
+    async def _brew_locked(self, slot: int) -> None:
+        """Send the brew sequence and confirm it. Caller holds ``_command_lock``."""
         from dizzycoffee.commands import DeviceCommand  # lazy
 
-        self._ensure_online()
-        self._ensure_idle("brew")
         await self._run_commands(
             [(DeviceCommand.SELECT_RECIPE, int(slot)), (DeviceCommand.PREPARE_RECIPE, int(slot))],
             refresh=False,
@@ -392,10 +454,12 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_start(self) -> None:
         from dizzycoffee.commands import DeviceCommand  # lazy
 
-        self._ensure_online()
-        await self._run_commands([(DeviceCommand.START, None)])
+        async with self._command_lock:
+            self._ensure_online()
+            await self._run_commands([(DeviceCommand.START, None)])
 
     async def async_stop(self) -> None:
+        """Stop. Deliberately skips ``_command_lock``: it must not queue behind a brew."""
         from dizzycoffee.commands import DeviceCommand  # lazy
 
         self._ensure_online()
@@ -404,9 +468,26 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_flush(self) -> None:
         from dizzycoffee.commands import DeviceCommand  # lazy
 
-        self._ensure_online()
-        self._ensure_idle("flush the hopper")
-        await self._run_commands([(DeviceCommand.HOPPER_FLUSH, None)])
+        async with self._command_lock:
+            self._ensure_online()
+            self._ensure_idle("flush the hopper")
+            await self._run_commands([(DeviceCommand.HOPPER_FLUSH, None)])
+
+    async def async_power(self, on: bool) -> None:
+        """Wake (SWITCH_ON) or switch off (SWITCH_OFF) the machine.
+
+        Opcodes are confirmed from the app (docs/PROTOCOL.md §5) but their
+        effects aren't live-verified yet; the Power switch that calls this is
+        disabled by default until they are. Switching off is refused mid-task.
+        """
+        from dizzycoffee.commands import DeviceCommand  # lazy
+
+        async with self._command_lock:
+            self._ensure_online()
+            if not on:
+                self._ensure_idle("switch it off")
+            cmd = DeviceCommand.SWITCH_ON if on else DeviceCommand.SWITCH_OFF
+            await self._run_commands([(cmd, None)])
 
     async def _async_confirm_brewing(self) -> None:
         """Wait for the machine to start pouring after a brew command.
@@ -449,7 +530,7 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if result == "brewing":
             return
         hint = attention.describe(
-            [r for r in attention.evaluate(self.data).reasons if r != "machine_error"]
+            [r for r in self.current_attention().reasons if r != "machine_error"]
         )
         hint = f" Check the machine: {hint}." if hint else " Check the machine's display."
         if result == "error":
@@ -526,15 +607,18 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         from dizzycoffee import recipes  # lazy
 
-        # Check before staging the recipe, so a refused brew changes nothing.
-        self._ensure_online()
-        self._ensure_idle("brew")
-        rec = self._recipe(recipe_id)
-        floats = recipes.to_floats(rec, **values)
-        client = self._client_or_raise()
-        await self._account_write(lambda: client.set_temporary_slot(self.thing, rec["id"], **floats))
-        await asyncio.sleep(_TEMP_SLOT_SETTLE)
-        await self.async_brew(recipes.TEMP_SLOT)
+        async with self._command_lock:
+            # Check before staging the recipe, so a refused brew changes nothing.
+            self._ensure_online()
+            self._ensure_idle("brew")
+            rec = self._recipe(recipe_id)
+            floats = recipes.to_floats(rec, **values)
+            client = self._client_or_raise()
+            await self._account_write(
+                lambda: client.set_temporary_slot(self.thing, rec["id"], **floats)
+            )
+            await asyncio.sleep(_TEMP_SLOT_SETTLE)
+            await self._brew_locked(recipes.TEMP_SLOT)
 
     async def async_save_recipe(
         self, base_recipe_id: str, name: str, slot: int | None = None, **values: Any
@@ -585,21 +669,78 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         if not (self._cert and self._key):
             raise HomeAssistantError("Spinn is not connected yet; try again shortly.")
-        await self.hass.async_add_executor_job(self._send_blocking, steps)
+        try:
+            await self.hass.async_add_executor_job(self._send_blocking, steps)
+        except Exception as err:  # noqa: BLE001 - surface any transport failure clearly
+            raise HomeAssistantError(
+                f"Couldn't send the command to the Spinn ({err or type(err).__name__}). "
+                "It may not have been received; check the machine before retrying."
+            ) from err
         if refresh:
             # Reflect the new machine state promptly.
             await self.async_request_refresh()
 
     def _send_blocking(self, steps: list[tuple[Any, int | None]]) -> None:
-        """ACTUATES THE MACHINE. Opens a short-lived command connection."""
+        """ACTUATES THE MACHINE. Publishes each step to ``<thing>/host``.
+
+        Uses the push stream's live connection when it has one (no new TLS
+        handshake, no trailing ack wait), otherwise a short-lived connection as
+        before. Either way consecutive steps are ``COMMAND_STEP_GAP`` apart, the
+        spacing the live-verified brew used.
+
+        If a publish on the shared connection fails, that connection is torn
+        down: awscrt may still hold the message and would deliver it when the
+        connection recovers, which for a brew could be minutes later. Nothing is
+        retried, for the same reason (a retry could brew twice).
+        """
         from dizzycoffee.commands import DeviceCommander  # lazy
+
+        stream = self._stream
+        conn = stream.connection if stream is not None else None
+        if conn is not None:
+            cmder = DeviceCommander.from_connection(conn, self.thing)
+            try:
+                for i, (cmd, param) in enumerate(steps):
+                    cmder.send(cmd, param, await_ack=0)
+                    if i + 1 < len(steps):
+                        time.sleep(COMMAND_STEP_GAP)
+            except Exception:
+                stream.disconnect()
+                raise
+            return
 
         assert self._cert and self._key
         with DeviceCommander(self.endpoint, self.thing, self._cert, self._key) as cmder:
             for i, (cmd, param) in enumerate(steps):
-                cmder.send(cmd, param)
+                # The ack window and the pause add up to COMMAND_STEP_GAP.
+                cmder.send(cmd, param, await_ack=COMMAND_STEP_GAP - 1.0)
                 if i + 1 < len(steps):
-                    time.sleep(1.0)  # mirror the CLI's inter-step pause
+                    time.sleep(1.0)
+
+    # ------------------------------------------------------------------ stats
+    async def async_fetch_stats(self) -> dict[str, Any]:
+        """Read the account's usage stats endpoints (for diagnostics).
+
+        Returns ``{"user_stats": ..., "coffee_backlog": ...}`` with each value
+        either the parsed response or ``{"error": "..."}``. Their shapes aren't
+        documented yet; this is how they get captured.
+        """
+        client = self._client
+
+        def _fetch() -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            for key, name in (("user_stats", "get_user_stats"), ("coffee_backlog", "get_coffee_backlog")):
+                fetch = getattr(client, name, None)
+                if fetch is None:
+                    out[key] = {"error": "not connected" if client is None else "client too old"}
+                    continue
+                try:
+                    out[key] = fetch(self.thing)
+                except Exception as err:  # noqa: BLE001 - diagnostics must not fail
+                    out[key] = {"error": str(err) or type(err).__name__}
+            return out
+
+        return await self.hass.async_add_executor_job(_fetch)
 
     # -------------------------------------------------------------- lifecycle
     async def async_shutdown_stream(self) -> None:

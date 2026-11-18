@@ -13,7 +13,7 @@ async def test_setup_and_unload(hass: HomeAssistant, coordinator) -> None:
     assert entry.state is ConfigEntryState.LOADED
 
     platforms = {e.domain for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)}
-    assert platforms == {"sensor", "binary_sensor", "button", "select", "event"}
+    assert platforms == {"sensor", "binary_sensor", "button", "select", "event", "switch"}
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

@@ -5,6 +5,7 @@ mocked; a side effect stands in for the machine by pushing a shadow update.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -152,3 +153,115 @@ async def test_brew_recipe_stages_temp_slot_and_brews(hass: HomeAssistant, coord
 
     client.set_temporary_slot.assert_called_once_with(THING, "r-lungo")
     assert [(int(cmd), slot) for cmd, slot in send.call_args.args[0]] == [(5, 7), (6, 7)]
+
+
+# --- transport: shared connection, fallback, serialisation -------------------
+
+
+def _shared_stream(conn: MagicMock) -> MagicMock:
+    stream = MagicMock(connected=True, connection=conn)
+    stream.get_snapshot.return_value = {}
+    return stream
+
+
+def _fake_conn(on_publish=None) -> MagicMock:
+    conn = MagicMock()
+
+    def _publish(topic, payload, qos):
+        if on_publish:
+            on_publish(topic, payload)
+        return (MagicMock(), 1)
+
+    conn.publish.side_effect = _publish
+    return conn
+
+
+async def test_brew_publishes_over_push_connection(hass: HomeAssistant, coordinator) -> None:
+    sent: list[tuple[str, bytes]] = []
+
+    def _on_publish(topic, payload):
+        sent.append((topic, payload))
+        if payload == b"0605":  # PREPARE: the machine starts pouring
+            hass.loop.call_soon_threadsafe(
+                coordinator.async_set_updated_data, {**coordinator.data, "MachineStatus": "PREPAREDRINK"}
+            )
+
+    conn = _fake_conn(_on_publish)
+    coordinator._stream = _shared_stream(conn)
+    with (
+        patch(f"{COORD}.COMMAND_STEP_GAP", 0),
+        patch("dizzycoffee.connection.build") as build,
+    ):
+        await _press(hass, "brew")
+
+    assert sent == [(f"{THING}/host", b"0505"), (f"{THING}/host", b"0605")]
+    build.assert_not_called()  # no second connection
+    conn.disconnect.assert_not_called()  # the push stream's connection stays up
+    conn.subscribe.assert_not_called()  # no ack subscription on the shared connection
+    coordinator._stream = None
+
+
+async def test_failed_publish_tears_down_shared_connection(hass: HomeAssistant, coordinator) -> None:
+    conn = MagicMock()
+    conn.publish.side_effect = RuntimeError("AWS_ERROR_MQTT_TIMEOUT")
+    stream = _shared_stream(conn)
+    coordinator._stream = stream
+    with pytest.raises(HomeAssistantError, match="Couldn't send the command.*AWS_ERROR_MQTT_TIMEOUT"):
+        await _press(hass, "stop")
+    stream.disconnect.assert_called_once()
+    coordinator._stream = None
+
+
+async def test_interrupted_stream_falls_back_to_fresh_connection(
+    hass: HomeAssistant, coordinator
+) -> None:
+    stream = MagicMock(connected=False, connection=None)  # interrupted
+    coordinator._stream = stream
+    conn = _fake_conn()
+    with (
+        patch(f"{COORD}.COMMAND_STEP_GAP", 1.0),  # ack window 0 s keeps the test fast
+        patch("dizzycoffee.connection.build", return_value=conn) as build,
+    ):
+        await _press(hass, "stop")
+
+    build.assert_called_once()
+    conn.connect.assert_called_once()
+    assert conn.publish.call_args.args[:2] == (f"{THING}/host", b"04")
+    conn.disconnect.assert_called_once()
+    coordinator._stream = None
+
+
+async def test_double_tap_brews_once(hass: HomeAssistant, coordinator) -> None:
+    with patch.object(
+        coordinator, "_send_blocking", side_effect=_machine_goes(hass, coordinator, MachineStatus="PREPAREDRINK")
+    ) as send:
+        results = await asyncio.gather(
+            _press(hass, "brew"), _press(hass, "brew"), return_exceptions=True
+        )
+
+    assert send.call_count == 1
+    errors = [r for r in results if isinstance(r, Exception)]
+    assert len(errors) == 1
+    assert isinstance(errors[0], HomeAssistantError)
+    assert "brewing" in str(errors[0])
+
+
+async def test_stop_does_not_wait_behind_a_brew(hass: HomeAssistant, coordinator) -> None:
+    sent = asyncio.Event()
+
+    def _send(steps):
+        hass.loop.call_soon_threadsafe(sent.set)
+
+    with (
+        patch(f"{COORD}.BREW_CONFIRM_TIMEOUT", 30),
+        patch(f"{COORD}.BREW_POLL_INTERVAL", 0.05),
+        patch.object(coordinator, "_send_blocking", side_effect=_send) as send,
+    ):
+        brew = hass.async_create_task(_press(hass, "brew"))
+        await sent.wait()  # brew sent; now waiting for the machine to pour
+        await asyncio.wait_for(_press(hass, "stop"), 5)  # goes straight through
+        assert not brew.done()
+        assert int(send.call_args.args[0][0][0]) == 4  # STOP
+
+        coordinator.async_set_updated_data({**coordinator.data, "MachineStatus": "PREPAREDRINK"})
+        await asyncio.wait_for(brew, 5)

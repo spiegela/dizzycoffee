@@ -68,6 +68,9 @@ class SpinnSensorEntityDescription(SensorEntityDescription):
 
     value_fn: Callable[[dict[str, Any]], Any]
     from_device: bool = False
+    # Extra state attributes computed from the coordinator (e.g. the configured
+    # maintenance interval on the cups-since counters).
+    attrs_fn: Callable[[SpinnCoordinator], dict[str, Any]] | None = None
 
 
 SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
@@ -188,6 +191,7 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: _int(d, "NoDeepCleanCounter"),
+        attrs_fn=lambda c: {"interval": c.deep_clean_every},
     ),
     SpinnSensorEntityDescription(
         key="NoDescaleCounter",
@@ -196,6 +200,7 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: _int(d, "NoDescaleCounter"),
+        attrs_fn=lambda c: {"interval": c.descale_every},
     ),
     SpinnSensorEntityDescription(
         key="ColdbrewCounter",
@@ -316,3 +321,8 @@ class SpinnSensor(SpinnEntity, SensorEntity):
         desc = self.entity_description
         source = self.coordinator.device if desc.from_device else self.coordinator.data
         return desc.value_fn(source or {})
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        fn = self.entity_description.attrs_fn
+        return fn(self.coordinator) if fn else None
