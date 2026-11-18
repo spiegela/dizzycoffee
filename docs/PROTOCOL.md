@@ -239,12 +239,25 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
   Level enum (from source + live): `EMPTY, EMPTYORREMOVED, FULL, LEVEL0, LEVEL1, LEVEL2, OK, PLACED,
   REMOVED` — note **`LEVEL0`** (seen live) was not in the decompiled enum. `WaterLineStatus` e.g.
   `WL_CONNECTED`.
-  **[L] What the levels mean is not pinned down.** Observed 2026-11-18, just after the owner emptied
-  both bins: `ResidueBin=PLACED`, `DripTray=PLACED`, `ResidueBinCapacity=86`, `DripTrayCapacity=270`.
-  So for the bins the enum may only say whether they're in place, and fill is presumably in the
-  `*Capacity` counters, whose units and direction (counting up as they fill, or down from a maximum)
-  aren't known. `HopperReservoir=LEVEL0` while the owner judged the hopper well above low, so
-  `LEVEL0` probably isn't "nearly empty".
+  **[V] What the levels mean (2026-11-18).** Two snapshots, before and after the owner emptied both
+  bins and filled the hopper:
+
+  | Key | Before | After |
+  |---|---|---|
+  | `ResidueBin` / `DripTray` | `PLACED` | `PLACED` |
+  | `ResidueBinCapacity` | `86` | `100` |
+  | `DripTrayCapacity` | `270` | `300` |
+  | `HopperReservoir` | `LEVEL0` | `LEVEL2` |
+
+  - For the bins the enum only says whether they're in place; it stayed `PLACED` either way (`FULL` /
+    `REMOVED` are in the enum but not yet seen).
+  - `*Capacity` is the **space left**: it counts down as the bin fills and resets to its maximum
+    when emptied, so % full = (max − value) / max with max 100 (grounds) and 300 (drip tray). Units
+    unknown (300 could be ml). An earlier emptying didn't reset them; possibly the bins weren't out
+    long enough to register. **[L]**
+  - The hopper reads `LEVEL0` < `LEVEL1` < `LEVEL2`, with `LEVEL2` right after filling. `LEVEL0` was
+    reported while the owner judged the hopper well above empty, so it's "low", not "empty" (which
+    is `EMPTY`).
 - **State:** `MachineStatus` `{READY, ACTIVE, STANDBY, CLEANING, EXPELL, PREPAREDRINK, MACHINEERROR,
   RECOVERING, RECOVERY, SPECIALTASK, INACTIVE, UNDEFINED}`; `ResetReason` e.g. `POWERON`.
   **[V] Brew lifecycle (observed live):** idle is `MachineStatus=INACTIVE` (asleep) or `ACTIVE`
@@ -285,7 +298,7 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
 **Every item is now live-verified.** Remaining nice-to-haves: the exact machine ack/event JSON (none
 seen for a normal brew beyond the self-echo), `STOP`/`flush` behaviour (opcodes confirmed, effects
 not individually exercised; power is now [V], §5), the `MachineStatus` right after `SWITCH_ON`
-(lights came on; status not captured), the bin and hopper level semantics (§6), and whether brews
+(lights came on; status not captured), the bins' `FULL` threshold and `LEVEL1` (§6), and whether brews
 made outside the app (machine buttons, Home Assistant) count towards `servings_count` (§3).
 
 ---

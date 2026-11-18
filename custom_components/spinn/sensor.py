@@ -18,11 +18,17 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT, EntityCategory, UnitOfVolume
+from homeassistant.const import (
+    PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+    UnitOfVolume,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from . import attention
 from .const import DOMAIN
 from .coordinator import SpinnCoordinator
 from .entity import SpinnEntity
@@ -43,6 +49,11 @@ def _int(data: dict[str, Any], key: str) -> int | None:
         return int(float(val))
     except (TypeError, ValueError):
         return None
+
+
+def _fill_pct(data: dict[str, Any], capacity_key: str) -> int | None:
+    fill = attention.waste_fill(data, capacity_key)
+    return None if fill is None else round(fill * 100)
 
 
 def _timestamp(data: dict[str, Any], key: str) -> datetime | None:
@@ -124,6 +135,14 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         value_fn=lambda d: _str(d, "ResidueBin"),
     ),
     SpinnSensorEntityDescription(
+        key="grounds_bin_level",
+        translation_key="grounds_bin_level",
+        icon="mdi:delete-variant",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: _fill_pct(d, "ResidueBinCapacity"),
+    ),
+    SpinnSensorEntityDescription(
         key="ResidueBinCapacity",
         translation_key="grounds_bin_capacity",
         icon="mdi:delete-variant",
@@ -136,6 +155,14 @@ SENSORS: tuple[SpinnSensorEntityDescription, ...] = (
         translation_key="drip_tray",
         icon="mdi:tray",
         value_fn=lambda d: _str(d, "DripTray"),
+    ),
+    SpinnSensorEntityDescription(
+        key="drip_tray_level",
+        translation_key="drip_tray_level",
+        icon="mdi:tray-full",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: _fill_pct(d, "DripTrayCapacity"),
     ),
     SpinnSensorEntityDescription(
         key="DripTrayCapacity",

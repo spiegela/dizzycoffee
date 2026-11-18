@@ -154,12 +154,13 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 |---|---|
 | Machine status | `READY`, `PREPAREDRINK`, `CLEANING`, `EXPELL`, `MACHINEERROR`, … (enum) |
 | Process status | Current step while brewing or cleaning (enum), *diagnostic* |
-| Beans | Hopper fill level |
+| Beans | Hopper level: `LEVEL0` (low), `LEVEL1`, `LEVEL2` (full), or `EMPTY` |
 | Water tank | Tank fill level |
 | Water volume | Water in the tank (ml) |
 | Water line status | Plumbed-in water line state, *diagnostic* |
-| Grounds bin · Grounds bin capacity | Grounds bin fill, and its capacity *(diagnostic)* |
-| Drip tray · Drip tray capacity | Drip tray fill, and its capacity *(diagnostic)* |
+| Grounds bin level · Drip tray level | How full each bin is (%), worked out from the machine's space-left counters |
+| Grounds bin · Drip tray | Whether each bin is in place (`PLACED` / `REMOVED`; `FULL` if the machine says so) |
+| Grounds bin capacity · Drip tray capacity | The raw space-left counters, *diagnostic*: they count down as the bin fills (from 100 and 300 when empty) and reset when you empty it |
 | Recipe number | Slot of the recipe last selected on the machine |
 | Shot count | Lifetime shots brewed |
 | Cups since deep clean · Cups since descale | Maintenance counters, *diagnostic*. Attribute `interval`: the cups between them set in the [options](#options) (0 = no reminder). |
@@ -184,8 +185,9 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 `reasons`: `machine_error`, `water_tank_empty`, `beans_empty`, `grounds_bin_full`,
 `grounds_bin_removed`, `drip_tray_full`, `drip_tray_removed`, `deep_clean_due`, `descale_due`.
 `warnings`: `water_tank_low`, `beans_low`, `grounds_bin_nearly_full`, `drip_tray_nearly_full`. The
-rules match the machine card's status icons. Deep clean and descale are due after 100 and 500 cups
-by default; change that in the [options](#options).
+rules match the machine card's status icons. A bin is nearly full at 80 % and full at 100 % (no space
+left, or the machine reports `FULL`); `beans_low` means the hopper reads `LEVEL0`. Deep clean and
+descale are due after 100 and 500 cups by default; change that in the [options](#options).
 
 **Event**
 

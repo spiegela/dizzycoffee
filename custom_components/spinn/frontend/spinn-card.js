@@ -6,17 +6,20 @@
  */
 "use strict";
 
-const CARD_VERSION = "0.3.3";
+const CARD_VERSION = "0.3.4";
 
 /* -------------------------------------------------------------- shared maps */
 
-// Consumable level enum -> fill fraction (docs/PROTOCOL.md §6).
+// Consumable level enum -> fill fraction (docs/PROTOCOL.md §6). The hopper's
+// sensor is coarse: LEVEL0 (low) < LEVEL1 < LEVEL2 (full, seen right after filling).
 const FILL_FRACTION = {
   EMPTY: 0, EMPTYORREMOVED: 0, REMOVED: 0,
-  LEVEL0: 0.12, LEVEL1: 0.5, LEVEL2: 0.8,
+  LEVEL0: 0.25, LEVEL1: 0.6, LEVEL2: 1,
   OK: 1, FULL: 1, PLACED: 1,
 };
 // Waste bins (grounds / drip tray): FULL is *bad*, empty is good. -1 = removed.
+// Only a fallback: how full they are comes from the "level" sensors (% full,
+// from the machine's space-left counters); the enum itself is mostly PLACED.
 const WASTE_FRACTION = {
   EMPTY: 0, OK: 0, PLACED: 0, LEVEL0: 0.2, LEVEL1: 0.5,
   LEVEL2: 0.8, FULL: 1, REMOVED: -1, EMPTYORREMOVED: -1,
@@ -682,7 +685,9 @@ const SUFFIX = {
   water_volume: ["sensor", "water_volume"],
   water_line: ["sensor", "water_line_status"],
   grounds: ["sensor", "grounds_bin"],
+  grounds_level: ["sensor", "grounds_bin_level"],
   drip_tray: ["sensor", "drip_tray"],
+  drip_tray_level: ["sensor", "drip_tray_level"],
   shot_count: ["sensor", "shot_count"],
   recipe_number: ["sensor", "recipe_number"],
   deep_clean_count: ["sensor", "cups_since_deep_clean"],
@@ -761,7 +766,7 @@ function levelBar(label, frac, tone) {
 }
 
 function fillTone(frac) {
-  if (frac <= 0.12) return "error";
+  if (frac <= 0) return "error";
   if (frac < 0.5) return "busy";
   return "ok";
 }
@@ -1093,10 +1098,18 @@ class SpinnMachineCard extends SpinnBase {
     // ---- consumables
     const up = (id) => (stateStr(hass, id) || "").toUpperCase();
     const bf = FILL_FRACTION[up(e.beans)] ?? 1, wf = FILL_FRACTION[up(e.water)] ?? 1;
-    const gf = WASTE_FRACTION[up(e.grounds)] ?? 0, tf = WASTE_FRACTION[up(e.drip_tray)] ?? 0;
+    // Bins: removed / FULL from the enum, otherwise % full from the level sensor.
+    const binFill = (enumId, levelId) => {
+      const s = up(enumId);
+      if (s === "REMOVED" || s === "EMPTYORREMOVED") return -1;
+      if (s === "FULL") return 1;
+      const pct = num(hass, levelId);
+      return pct !== undefined ? pct / 100 : WASTE_FRACTION[s] ?? 0;
+    };
+    const gf = binFill(e.grounds, e.grounds_level), tf = binFill(e.drip_tray, e.drip_tray_level);
     const vol = num(hass, e.water_volume);
     const shots = num(hass, e.shot_count);
-    const out = (f) => (f < 0 ? " · removed" : "");
+    const out = (f) => (f < 0 ? " · removed" : ` · ${Math.round(Math.min(1, f) * 100)}%`);
     root.querySelector(".meta").innerHTML =
       levelBar("Beans", bf, fillTone(bf)) +
       levelBar("Water" + (vol !== undefined ? ` · ${vol} ml` : ""), wf, fillTone(wf)) +
@@ -1122,7 +1135,7 @@ class SpinnMachineCard extends SpinnBase {
       g.classList.toggle("warn", level === "warn");
       g.classList.toggle("alert", level === "alert");
     };
-    const lvl = (frac) => (frac <= 0 ? "alert" : frac <= 0.12 ? "warn" : null);
+    const lvl = (frac) => (frac <= 0 ? "alert" : frac <= 0.25 ? "warn" : null);
     setSt("tank", offline ? null : lvl(wf));
     setSt("bean", offline ? null : lvl(bf));
     setSt("drops", offline ? null : descDue ? "warn" : null);

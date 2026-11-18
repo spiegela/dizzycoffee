@@ -69,6 +69,6 @@ DEFAULT_DEEP_CLEAN_EVERY = 100
 DEFAULT_DESCALE_EVERY = 500
 
 # Lovelace dashboard cards (served by the integration; see frontend/).
-CARD_VERSION = "0.3.3"
+CARD_VERSION = "0.3.4"
 FRONTEND_URL_BASE = f"/{DOMAIN}_cards"
 FRONTEND_SCRIPT = "spinn-card.js"
