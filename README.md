@@ -116,11 +116,17 @@ subscription (`cloud_push`) with a periodic re-read as a fallback.
   and the installed cookbook update within a second or two of the machine changing.
 - **Brew from Home Assistant** — any cookbook slot, or **any recipe at all** (specials, milk
   drinks, unsaved tweaks) through the machine's temporary slot, without touching your cookbook.
+  A brew only reports success once the machine is actually pouring; otherwise you get an error
+  saying why (offline, busy, empty tank, full drip tray, …).
+- **Automation hooks** — a **Brew** event (started / finished / failed, for brews started
+  anywhere) and a single **Needs attention** sensor that lists what to refill, empty or clean.
 - **Recipe editor** — every recipe on your account with its real adjustable ranges; save
   your own versions and install them on the machine's buttons.
 - **Maintenance at a glance** — cups since deep clean / descale, filter uses, and when each was
   last done.
 - **Three theme-aware dashboard cards**, registered automatically.
+- **Diagnostics download** with tokens, certificate, serial and MAC addresses removed, for
+  bug reports.
 - **No password stored** — sign-in is exchanged for a session token; the device certificate is
   fetched fresh each cycle and never written to disk.
 
@@ -159,6 +165,32 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 | Brewing | `MachineStatus` is `PREPAREDRINK` |
 | Cleaning | `MachineStatus` is `CLEANING` or `EXPELL` (rinse / flush) |
 | Error | `MachineStatus` is `MACHINEERROR` |
+| Needs attention | Something needs doing: water or beans empty, grounds bin or drip tray full or out, deep clean or descale due, or a machine error. Attribute `reasons` lists what turned it on; `warnings` lists heads-ups that don't (water/beans low, bin/tray nearly full). |
+
+`reasons`: `machine_error`, `water_tank_empty`, `beans_empty`, `grounds_bin_full`,
+`grounds_bin_removed`, `drip_tray_full`, `drip_tray_removed`, `deep_clean_due` (100 cups since the
+last deep clean), `descale_due` (500 cups). `warnings`: `water_tank_low`, `beans_low`,
+`grounds_bin_nearly_full`, `drip_tray_nearly_full`. The rules match the machine card's status
+icons.
+
+**Event**
+
+| Entity | Fires |
+|---|---|
+| Brew | `started` when the machine begins pouring, `finished` when it stops (including after **Stop**), `failed` if it goes from pouring to an error. Brews started from the machine's buttons or the Spinn app count too. Event data: `slot`, `recipe`, `recipe_id`, and `duration_s` on finished / failed. |
+
+```yaml
+# e.g. tell me when my coffee's ready
+triggers:
+  - trigger: state
+    entity_id: event.kitchen_spinn_brew
+    attribute: event_type
+    to: finished
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      message: "{{ trigger.to_state.attributes.recipe or 'Coffee' }} is ready ☕"
+```
 
 **Buttons** — *these actuate your machine*
 
@@ -167,6 +199,13 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 | Brew | Brews the slot chosen in **Recipe slot** |
 | Start · Stop | Start / stop the current operation |
 | Hopper flush | Runs a hopper flush |
+
+Commands are refused, with an error saying why, while the shadow reports the machine **offline**
+(otherwise the cloud would accept a brew for a switched-off machine and nothing would happen).
+**Brew** and **Hopper flush** are also refused while the machine is busy (brewing, cleaning,
+rinsing, recovering); **Stop** always goes through while it's online. **Brew** waits for the
+machine to report that it's pouring: if it reports an error, or hasn't started within 60 s, the
+press fails with whatever the machine says needs attention ("the water tank is empty").
 
 **Select**
 
@@ -194,7 +233,7 @@ come from the **Recipe catalog** sensor's `recipes` attribute (they're specific 
 
 | Service | Does | Fields |
 |---|---|---|
-| `spinn.brew_recipe` | **Brews** any recipe once via the temporary slot. *Actuates the machine.* | `recipe_id`, optional `strength_g`, `size_ml`, `balance_pct`, `coffee_first` |
+| `spinn.brew_recipe` | **Brews** any recipe once via the temporary slot. *Actuates the machine.* Same checks as the Brew button: refused when offline or busy (before anything is staged), and returns only once the machine is pouring. | `recipe_id`, optional `strength_g`, `size_ml`, `balance_pct`, `coffee_first` |
 | `spinn.save_recipe` | Saves an adjusted copy as your own recipe, optionally installing it. Returns `{id, name, slot}`. | `base_recipe_id`, `name`, optional `slot` (0–6) + the same values |
 | `spinn.install_recipe` | Puts an existing recipe into a slot | `recipe_id`, `slot` (0–6) |
 | `spinn.delete_recipe` | Deletes one of your custom recipes (refused if it's installed in a slot) | `recipe_id` |
@@ -334,6 +373,14 @@ To choose a drawing yourself, set `icon` on a favorite or recipe tile: `espresso
 
 If you ever disable auto-registration, add the module manually as a dashboard resource:
 `/spinn_cards/spinn-card.js` (JavaScript module).
+
+### Diagnostics
+
+**Settings → Devices & Services → Spinn → ⋮ → Download diagnostics** saves a JSON file with
+the machine's live state, the device record, the installed cookbook, the recipe catalog, the
+connection status and what **Needs attention** sees. The session token, email, device
+certificate and key, serial number, MAC addresses, Wi-Fi details and the machine's thing name
+are removed, so it's safe to attach to an issue.
 
 > Publishing to `<thing>/host` **actuates the machine**. The Brew/Start/Stop/Flush buttons, the
 > recipe tiles, the machine's drawn cup buttons, **Brew once** and `spinn.brew_recipe` all do

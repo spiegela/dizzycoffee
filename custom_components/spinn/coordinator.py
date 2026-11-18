@@ -17,8 +17,12 @@ thread; they are marshalled back onto the event loop with
 ``hass.loop.call_soon_threadsafe`` before touching coordinator state.
 
 The write path (``async_brew`` / ``async_start`` / ``async_stop`` /
-``async_flush``) is kept explicit — only the ``button`` platform calls it. Every
-other code path here is read-only.
+``async_flush``) is kept explicit — only the ``button`` platform and the
+``spinn.brew_recipe`` service call it. Every other code path here is read-only.
+Commands are refused while the shadow says the machine is offline (and brews /
+flushes while it's busy), and a brew waits for the machine to report
+``PREPAREDRINK`` so a brew that never starts raises an error instead of
+silently succeeding.
 
 All library imports are lazy (inside methods) so this module imports cleanly for
 structural checks even when ``dizzycoffee`` isn't yet importable; a missing
@@ -40,7 +44,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from . import attention
 from .const import (
+    BREW_CONFIRM_TIMEOUT,
+    BREW_POLL_INTERVAL,
+    BUSY_STATUSES,
     CONF_THING_NAME,
     CONF_TOKEN,
     DEFAULT_IOT_BASE,
@@ -56,6 +64,9 @@ _LOGGER = logging.getLogger(__name__)
 _CONNECT_TIMEOUT = 15.0
 # Cookbook changes only when the user edits it in the app; re-read every 15 min.
 _COOKBOOK_TTL = 900.0
+# Pause between staging a recipe in the temporary slot and brewing it, so the
+# cloud has pushed the staged recipe to the machine.
+_TEMP_SLOT_SETTLE = 1.5
 
 
 def extract_reported(doc: dict[str, Any]) -> dict[str, Any]:
@@ -310,14 +321,19 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (spinn_error, ValueError, KeyError, TypeError) as err:
             _LOGGER.debug("recipe/cookbook fetch failed (%s); keeping previous", err)
 
-    def slot_name(self, slot: int | None) -> str | None:
-        """Recipe name installed in ``slot``, if known."""
+    def slot_recipe(self, slot: int | None) -> dict[str, Any] | None:
+        """Cookbook entry for ``slot`` (name, recipe_id, ...), if known."""
         if slot is None:
             return None
         for item in self.cookbook:
             if item.get("slot") == slot:
-                return item.get("name")
+                return item
         return None
+
+    def slot_name(self, slot: int | None) -> str | None:
+        """Recipe name installed in ``slot``, if known."""
+        item = self.slot_recipe(slot)
+        return item.get("name") if item else None
 
     # ------------------------------------------------------------------ push
     def _push_reported(self, reported: dict[str, Any]) -> None:  # awscrt thread
@@ -329,33 +345,132 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self.async_set_updated_data({**(self.data or {}), **reported})
 
+    # ---------------------------------------------------------- command guards
+    def _ensure_online(self) -> None:
+        """Refuse to publish while the shadow says the machine is offline.
+
+        A publish to ``<thing>/host`` is accepted by AWS IoT whether or not the
+        machine is listening, so without this a command to a switched-off
+        machine "succeeds" and does nothing. If the machine keeps a persistent
+        MQTT session, the broker could also queue it and deliver it whenever the
+        machine next connects, which for a brew would be worse. An unknown
+        ``connected`` value is not treated as offline.
+        """
+        if str((self.data or {}).get("connected", "")).lower() == "false":
+            raise HomeAssistantError(
+                "The Spinn is offline (not connected to Spinn's cloud), so nothing was sent. "
+                "Check that it's switched on and on Wi-Fi."
+            )
+
+    def _ensure_idle(self, action: str) -> None:
+        """Refuse a brew / flush while the machine is mid-task."""
+        status = (self.data or {}).get("MachineStatus")
+        if status in BUSY_STATUSES:
+            raise HomeAssistantError(
+                f"The Spinn is {BUSY_STATUSES[status]}; wait for it to finish before you {action}."
+            )
+
     # --------------------------------------------------------------- commands
     async def async_brew(self, slot: int) -> None:
         """Brew a cookbook slot: SELECT_RECIPE+slot then PREPARE_RECIPE+slot.
 
         docs/PROTOCOL.md §5 [V]: this exact sequence poured a real cup and the
-        slot byte equals the shadow's ``RecipeNumber``.
+        slot byte equals the shadow's ``RecipeNumber``. Returns once the machine
+        reports ``PREPAREDRINK``; raises if it reports an error or doesn't start
+        within ``BREW_CONFIRM_TIMEOUT``.
         """
         from dizzycoffee.commands import DeviceCommand  # lazy
 
+        self._ensure_online()
+        self._ensure_idle("brew")
         await self._run_commands(
-            [(DeviceCommand.SELECT_RECIPE, int(slot)), (DeviceCommand.PREPARE_RECIPE, int(slot))]
+            [(DeviceCommand.SELECT_RECIPE, int(slot)), (DeviceCommand.PREPARE_RECIPE, int(slot))],
+            refresh=False,
         )
+        await self._async_confirm_brewing()
 
     async def async_start(self) -> None:
         from dizzycoffee.commands import DeviceCommand  # lazy
 
+        self._ensure_online()
         await self._run_commands([(DeviceCommand.START, None)])
 
     async def async_stop(self) -> None:
         from dizzycoffee.commands import DeviceCommand  # lazy
 
+        self._ensure_online()
         await self._run_commands([(DeviceCommand.STOP, None)])
 
     async def async_flush(self) -> None:
         from dizzycoffee.commands import DeviceCommand  # lazy
 
+        self._ensure_online()
+        self._ensure_idle("flush the hopper")
         await self._run_commands([(DeviceCommand.HOPPER_FLUSH, None)])
+
+    async def _async_confirm_brewing(self) -> None:
+        """Wait for the machine to start pouring after a brew command.
+
+        Watches pushed shadow updates for ``MachineStatus``: ``PREPAREDRINK``
+        means it started, ``MACHINEERROR`` means it refused. Every
+        ``BREW_POLL_INTERVAL`` seconds without an answer it re-reads the shadow,
+        in case the push stream dropped. On error or timeout it raises with
+        whatever the shadow says needs attention (empty tank, full tray, ...).
+        """
+        loop = self.hass.loop
+        outcome: asyncio.Future[str] = loop.create_future()
+
+        def _check() -> None:
+            if outcome.done():
+                return
+            status = (self.data or {}).get("MachineStatus")
+            if status == "PREPAREDRINK":
+                outcome.set_result("brewing")
+            elif status == "MACHINEERROR":
+                outcome.set_result("error")
+
+        unsub = self.async_add_listener(_check)
+        try:
+            _check()
+            deadline = loop.time() + BREW_CONFIRM_TIMEOUT
+            while not outcome.done():
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(asyncio.shield(outcome), min(BREW_POLL_INTERVAL, remaining))
+                except TimeoutError:
+                    if loop.time() < deadline:
+                        await self._async_poll_snapshot()
+        finally:
+            unsub()
+
+        result = outcome.result() if outcome.done() else None
+        if result == "brewing":
+            return
+        hint = attention.describe(
+            [r for r in attention.evaluate(self.data).reasons if r != "machine_error"]
+        )
+        hint = f" Check the machine: {hint}." if hint else " Check the machine's display."
+        if result == "error":
+            raise HomeAssistantError(f"The Spinn reported an error instead of brewing.{hint}")
+        raise HomeAssistantError(
+            f"The Spinn didn't start brewing within {int(BREW_CONFIRM_TIMEOUT)} s.{hint}"
+        )
+
+    async def _async_poll_snapshot(self) -> None:
+        """Re-read the shadow once over the push stream (best-effort)."""
+        stream = self._stream
+        if stream is None or not stream.connected:
+            return
+        try:
+            doc = await self.hass.async_add_executor_job(stream.get_snapshot, BREW_POLL_INTERVAL)
+        except Exception as err:  # noqa: BLE001 - a missed poll just waits for the next
+            _LOGGER.debug("shadow poll during brew failed: %s", err)
+            return
+        reported = extract_reported(doc)
+        if reported:
+            self.async_set_updated_data({**(self.data or {}), **reported})
 
     # ------------------------------------------------------ recipe operations
     # Account writes (cookbook / custom recipes). Only brew_recipe also
@@ -411,11 +526,14 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         from dizzycoffee import recipes  # lazy
 
+        # Check before staging the recipe, so a refused brew changes nothing.
+        self._ensure_online()
+        self._ensure_idle("brew")
         rec = self._recipe(recipe_id)
         floats = recipes.to_floats(rec, **values)
         client = self._client_or_raise()
         await self._account_write(lambda: client.set_temporary_slot(self.thing, rec["id"], **floats))
-        await asyncio.sleep(1.5)  # let the cloud push the staged recipe to the machine
+        await asyncio.sleep(_TEMP_SLOT_SETTLE)
         await self.async_brew(recipes.TEMP_SLOT)
 
     async def async_save_recipe(
@@ -462,12 +580,15 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         client = self._client_or_raise()
         await self._account_write(lambda: client.delete_custom_recipe(rec["id"]))
 
-    async def _run_commands(self, steps: list[tuple[Any, int | None]]) -> None:
+    async def _run_commands(
+        self, steps: list[tuple[Any, int | None]], *, refresh: bool = True
+    ) -> None:
         if not (self._cert and self._key):
             raise HomeAssistantError("Spinn is not connected yet; try again shortly.")
         await self.hass.async_add_executor_job(self._send_blocking, steps)
-        # Reflect the new machine state promptly.
-        await self.async_request_refresh()
+        if refresh:
+            # Reflect the new machine state promptly.
+            await self.async_request_refresh()
 
     def _send_blocking(self, steps: list[tuple[Any, int | None]]) -> None:
         """ACTUATES THE MACHINE. Opens a short-lived command connection."""

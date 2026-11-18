@@ -9,7 +9,7 @@ from __future__ import annotations
 
 DOMAIN = "spinn"
 
-PLATFORMS: list[str] = ["sensor", "binary_sensor", "button", "select"]
+PLATFORMS: list[str] = ["sensor", "binary_sensor", "button", "select", "event"]
 
 # Config-entry keys.
 CONF_EMAIL = "email"
@@ -33,6 +33,28 @@ MANUFACTURER = "Spinn"
 # shadow ``update/documents`` stream; this is a safety-net re-read that also
 # refreshes the device record (and rotates the fetched certificate).
 UPDATE_INTERVAL_SECONDS = 120
+
+# Machine states in which a brew or flush is refused (the machine is mid-task).
+# Matches the statuses the machine card treats as busy.
+BUSY_STATUSES: dict[str, str] = {
+    "PREPAREDRINK": "brewing",
+    "CLEANING": "cleaning",
+    "EXPELL": "rinsing",
+    "RECOVERING": "recovering",
+    "RECOVERY": "recovering",
+    "SPECIALTASK": "busy with another task",
+}
+
+# After a brew command, how long to wait for MachineStatus=PREPAREDRINK before
+# reporting that the machine didn't start, and how often to re-read the shadow
+# meanwhile in case a push is missed.
+BREW_CONFIRM_TIMEOUT = 60.0
+BREW_POLL_INTERVAL = 5.0
+
+# Cups between deep cleans / descales before "due" (same defaults as the card's
+# deep_clean_every / descale_every).
+DEFAULT_DEEP_CLEAN_EVERY = 100
+DEFAULT_DESCALE_EVERY = 500
 
 # Lovelace dashboard cards (served by the integration; see frontend/).
 CARD_VERSION = "0.3.1"

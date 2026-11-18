@@ -1,4 +1,4 @@
-"""Binary sensors: connectivity, brewing, and error state."""
+"""Binary sensors: connectivity, brewing, cleaning, error, and needs attention."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -15,6 +15,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import attention
 from .const import DOMAIN
 from .coordinator import SpinnCoordinator
 from .entity import SpinnEntity
@@ -74,7 +75,10 @@ async def async_setup_entry(
 ) -> None:
     coordinator: SpinnCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        SpinnBinarySensor(coordinator, desc) for desc in BINARY_SENSORS
+        [
+            *(SpinnBinarySensor(coordinator, desc) for desc in BINARY_SENSORS),
+            SpinnAttentionBinarySensor(coordinator),
+        ]
     )
 
 
@@ -95,3 +99,29 @@ class SpinnBinarySensor(SpinnEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return self.entity_description.is_on_fn(self.coordinator.data or {})
+
+
+class SpinnAttentionBinarySensor(SpinnEntity, BinarySensorEntity):
+    """On when something needs doing: refill, empty, put back, clean, or an error.
+
+    Attributes: ``reasons`` (what turned it on) and ``warnings`` (low / nearly
+    full heads-ups that don't), as stable keys; see attention.py.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    entity_description = BinarySensorEntityDescription(
+        key="needs_attention", translation_key="needs_attention"
+    )
+
+    def __init__(self, coordinator: SpinnCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.thing}_needs_attention"
+
+    @property
+    def is_on(self) -> bool:
+        return attention.evaluate(self.coordinator.data).needed
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        result = attention.evaluate(self.coordinator.data)
+        return {"reasons": result.reasons, "warnings": result.warnings}
