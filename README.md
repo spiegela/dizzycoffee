@@ -65,9 +65,9 @@ uv run python -m dizzycoffee state
 uv run python -m dizzycoffee stats
 ```
 
-`stats` reads the two usage endpoints the app uses (`stats/api/user-stats` and
-`average-consumer/api/coffee-backlog`). Their fields aren't documented yet; if you run it, opening
-an issue with the output (minus anything personal) lets them become Home Assistant sensors.
+`stats` prints the two usage endpoints the app uses: `stats/api/user-stats` (servings per recipe,
+which the Home Assistant **Servings** sensor shows) and `average-consumer/api/coffee-backlog` (bean
+orders from Spinn's shop).
 
 The login step writes a session token to `~/.config/dizzycoffee/session.json` (outside this
 repo). The device certificate is fetched fresh each run and never written to disk.
@@ -163,6 +163,7 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 | Cold brew counter | Cold brews made, *diagnostic* |
 | Last cleaning · Last descaling · Last filter change | Timestamps, *diagnostic* |
 | Wi-Fi signal · Air pressure | dBm / sensor reading, *diagnostic*, disabled by default |
+| Servings | Drinks made on your Spinn account, from Spinn's stats (total, increasing). Attributes `top_recipe` and `recipes` (each recipe's count, most brewed first). Re-read every 15 min and shortly after each brew. Account-wide: two machines on one account show the same totals. |
 | Recipe catalog | Count of recipes; attributes `recipes` (every recipe with its values and adjustable ranges) and `cookbook` (what's in each slot). Used by the recipe editor; not recorded to history. |
 
 **Binary sensors**
@@ -436,6 +437,18 @@ uv venv --python 3.14
 uv pip install -r requirements_test.txt
 .venv/bin/python -m pytest
 ```
+
+To try a branch on your own Home Assistant before it's released, deploy it from your checkout
+over SSH (on Home Assistant OS: the **Terminal & SSH** or **Advanced SSH & Web Terminal** add-on,
+with your key added):
+
+```bash
+scripts/deploy-to-ha.sh root@homeassistant.local        # add a port if it isn't 22
+```
+
+It copies `custom_components/spinn/` into `/config/custom_components/`, keeps the copy it replaced
+in `/config/.dizzycoffee/spinn.bak`, then checks the config and restarts Home Assistant
+(`NO_RESTART=1` to skip that). Redownloading in HACS / Marketplace puts the released version back.
 
 CI (`.github/workflows/ci.yml`) runs these tests, Home Assistant's **hassfest** validation and
 the **HACS** validation on every push and pull request. The tests also check that the bundled

@@ -270,6 +270,7 @@ async def async_setup_entry(
     async_add_entities([
         *(SpinnSensor(coordinator, desc) for desc in SENSORS),
         SpinnRecipeCatalogSensor(coordinator),
+        SpinnServingsSensor(coordinator),
     ])
 
 
@@ -302,6 +303,38 @@ class SpinnRecipeCatalogSensor(SpinnEntity, SensorEntity):
                 for c in self.coordinator.cookbook
             ],
         }
+
+
+class SpinnServingsSensor(SpinnEntity, SensorEntity):
+    """Drinks made on the Spinn account (``stats/api/user-stats``).
+
+    State: total servings. Attributes: ``top_recipe`` and ``recipes`` (each
+    recipe's count, most brewed first; kept out of the recorder). Account-wide,
+    so with two machines on one account both show the same totals. Re-read
+    every 15 min and after each brew.
+    """
+
+    _attr_icon = "mdi:coffee"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "servings"
+    _unrecorded_attributes = frozenset({"recipes"})
+    entity_description = SensorEntityDescription(key="servings", translation_key="servings")
+
+    def __init__(self, coordinator: SpinnCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.thing}_servings"
+
+    @property
+    def native_value(self) -> int | None:
+        stats = self.coordinator.stats
+        return stats["servings"] if stats else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        stats = self.coordinator.stats
+        if not stats:
+            return None
+        return {"top_recipe": stats["top_recipe"], "recipes": stats["recipes"]}
 
 
 class SpinnSensor(SpinnEntity, SensorEntity):
