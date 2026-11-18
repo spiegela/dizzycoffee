@@ -4,10 +4,10 @@ On means awake: any ``MachineStatus`` other than asleep / standby
 (``INACTIVE``, ``STANDBY``). Turning it on sends ``SWITCH_ON``, off sends
 ``SWITCH_OFF`` (docs/PROTOCOL.md §5); the state then follows the shadow.
 
-Disabled by default: the opcodes are confirmed from the app, but what they do
-on the machine hasn't been live-verified yet. In particular, if ``SWITCH_OFF``
-turned the machine fully off (Wi-Fi included), it couldn't be switched back on
-remotely. Enable it from the device page once that has been checked.
+Live-verified 2026-11-18 (docs/PROTOCOL.md §5): ``SWITCH_OFF`` puts the machine
+to sleep (``MachineStatus`` ``INACTIVE``) while it stays connected, and
+``SWITCH_ON`` wakes it (panel lights back on), so it can be switched back on
+remotely.
 
 Unavailable while the machine is offline, since commands are refused then.
 """
@@ -22,6 +22,7 @@ from homeassistant.components.switch import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import ASLEEP_STATUSES, DOMAIN
@@ -35,7 +36,26 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: SpinnCoordinator = hass.data[DOMAIN][entry.entry_id]
+    _enable_if_disabled_by_us(hass, coordinator)
     async_add_entities([SpinnPowerSwitch(coordinator)])
+
+
+def _enable_if_disabled_by_us(hass: HomeAssistant, coordinator: SpinnCoordinator) -> None:
+    """Enable a Power switch that an earlier build registered as disabled.
+
+    Pre-release builds of 0.4.0 shipped the switch disabled until the power
+    opcodes were verified. Changing the default only affects new entities, so
+    re-enable ours here. One the user disabled (disabled_by=USER) stays off.
+    Like enabling it in the UI, this makes Home Assistant reload the entry once,
+    about 30 s later.
+    """
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("switch", DOMAIN, f"{coordinator.thing}_power")
+    if entity_id is None:
+        return
+    entry = registry.async_get(entity_id)
+    if entry is not None and entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION:
+        registry.async_update_entity(entity_id, disabled_by=None)
 
 
 class SpinnPowerSwitch(SpinnEntity, SwitchEntity):
@@ -43,7 +63,6 @@ class SpinnPowerSwitch(SpinnEntity, SwitchEntity):
 
     _attr_device_class = SwitchDeviceClass.SWITCH
     _attr_icon = "mdi:power"
-    _attr_entity_registry_enabled_default = False
     entity_description = SwitchEntityDescription(key="power", translation_key="power")
 
     def __init__(self, coordinator: SpinnCoordinator) -> None:

@@ -103,8 +103,9 @@ uv run python -m dizzycoffee send --hex 0602  # raw escape hatch
 > **Verified:** `brew` (`SELECT_RECIPE` then `PREPARE_RECIPE`) pours, and `--slot N` maps to the
 > shadow's `RecipeNumber N` (slots 0–3 are the user dots, 4/5/6 the tall/medium/small cup buttons;
 > see [Cookbook slots](#cookbook-slots)). `--sequence prepare` sends `PREPARE_RECIPE` alone if you want to try it.
-> `power`/`start`/`stop`/`flush` opcodes are confirmed from the app but their individual effects
-> aren't separately exercised yet. Details in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+> `power off` puts the machine to sleep (`MachineStatus` `INACTIVE`) and it stays online, so
+> `power on` wakes it remotely (verified). `start`/`stop`/`flush` opcodes are confirmed from the
+> app but their individual effects aren't separately exercised yet. Details in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
 ## Home Assistant integration
 
@@ -135,7 +136,7 @@ subscription (`cloud_push`) with a periodic re-read as a fallback.
   your own versions and install them on the machine's buttons.
 - **Maintenance at a glance** — cups since deep clean / descale, filter uses, and when each was
   last done, with reminder intervals you set in the integration's options.
-- **Power switch** (opt-in, see below) to wake the machine or switch it off.
+- **Power switch** to wake the machine or put it to sleep.
 - **Three theme-aware dashboard cards**, registered automatically.
 - **Diagnostics download** with tokens, certificate, serial and MAC addresses removed, for
   bug reports.
@@ -225,16 +226,11 @@ machine busy). **Stop** never waits behind another command. Commands go out over
 the integration already holds for live updates, so there's no new connection per press; if that
 connection is down they use a short-lived one instead.
 
-**Switch** — *actuates your machine; disabled by default*
+**Switch** — *actuates your machine*
 
 | Entity | Does |
 |---|---|
-| Power | On while the machine is awake, off while it's asleep or in standby (`MachineStatus` `INACTIVE` / `STANDBY`). Turning it on sends `SWITCH_ON`, off sends `SWITCH_OFF`. Off is refused mid-task. Unavailable while the machine is offline. |
-
-> **Why it's disabled:** the power opcodes come from the app but haven't been tested on a
-> machine yet. If `SWITCH_OFF` turned the machine fully off, Wi-Fi included, Home Assistant
-> couldn't switch it back on. Try it once while you're standing next to the machine before you
-> rely on it: enable it on the device page (**Entities → Power → Enable**).
+| Power | On while the machine is awake, off while it's asleep or in standby (`MachineStatus` `INACTIVE` / `STANDBY`). Turning it off sends `SWITCH_OFF`, which puts the machine to sleep; it stays online, so turning it on (`SWITCH_ON`) wakes it from anywhere. Off is refused mid-task. Unavailable while the machine is offline. |
 
 **Select**
 
@@ -531,8 +527,9 @@ skips the restart. Redownloading in HACS / Marketplace puts the released version
   from an entity.
 - CLI commands that actuate stay confirmation-gated (`YES` or `--yes`) and support `--dry-run`.
 - Nothing retries an actuating publish: a retry could brew twice.
-- Behaviour that hasn't been tried on a machine ships off by default or clearly labelled, like the
-  Power switch. Never point tests or CI at a real machine.
+- Behaviour that hasn't been tried on a machine ships off by default or clearly labelled (the
+  Power switch stayed disabled until power off/on was verified). Never point tests or CI at a
+  real machine.
 
 **Protocol facts carry their evidence.** [`docs/PROTOCOL.md`](docs/PROTOCOL.md) tags each claim:
 **[C]** confirmed from the decompiled app, **[L]** still to verify live, **[V]** live-verified

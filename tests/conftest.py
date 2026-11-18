@@ -100,7 +100,10 @@ async def setup_spinn(hass: HomeAssistant):
     """Factory: set up the integration with optional shadow overrides."""
     patches: list[Any] = []
 
-    async def _setup(**shadow_overrides: Any) -> SpinnCoordinator:
+    async def _setup(
+        *, before: Callable[[MockConfigEntry], None] | None = None, **shadow_overrides: Any
+    ) -> SpinnCoordinator:
+        """``before(entry)`` runs after the entry exists, before setup (e.g. to seed the registry)."""
         shadow = {**SHADOW, **shadow_overrides}
 
         def _refresh(self: SpinnCoordinator):
@@ -120,6 +123,8 @@ async def setup_spinn(hass: HomeAssistant):
             domain=DOMAIN, unique_id=THING, title="Kitchen Spinn", data=dict(ENTRY_DATA)
         )
         entry.add_to_hass(hass)
+        if before is not None:
+            before(entry)
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         return hass.data[DOMAIN][entry.entry_id]

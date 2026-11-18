@@ -202,6 +202,10 @@ NotificationsFunctionsApi, RoasterFunctionsApi, MarketplaceFunctionsApi, IotWith
 
 Examples (payload is the literal ASCII hex):
 - Power on / off → `"01"` / `"02"` · Start / Stop brew → `"03"` / `"04"` · Hopper flush → `"11"`
+- **[V] Power (2026-11-18):** `SWITCH_OFF` (`"02"`) put the machine to sleep: `MachineStatus=INACTIVE`,
+  `ProcessStatus=UNDEFINED`, and `connected` stayed `true` (Wi-Fi/IoT link up). `SWITCH_ON` (`"01"`)
+  then woke it: the panel lights came back on. So power can be toggled remotely in both directions.
+  Only the self-echo came back on `<thing>/host` (`acks: [{'_raw': '02'}]`).
 - **[V] Brew recipe slot 5** (verified live): publish `SELECT_RECIPE`+slot `"0505"`, then
   `PREPARE_RECIPE`+slot `"0605"` → the machine enters `MachineStatus=PREPAREDRINK` and pours. The
   select-then-prepare sequence works, and **the slot byte equals the shadow's `RecipeNumber`** value
@@ -235,6 +239,12 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
   Level enum (from source + live): `EMPTY, EMPTYORREMOVED, FULL, LEVEL0, LEVEL1, LEVEL2, OK, PLACED,
   REMOVED` — note **`LEVEL0`** (seen live) was not in the decompiled enum. `WaterLineStatus` e.g.
   `WL_CONNECTED`.
+  **[L] What the levels mean is not pinned down.** Observed 2026-11-18, just after the owner emptied
+  both bins: `ResidueBin=PLACED`, `DripTray=PLACED`, `ResidueBinCapacity=86`, `DripTrayCapacity=270`.
+  So for the bins the enum may only say whether they're in place, and fill is presumably in the
+  `*Capacity` counters, whose units and direction (counting up as they fill, or down from a maximum)
+  aren't known. `HopperReservoir=LEVEL0` while the owner judged the hopper well above low, so
+  `LEVEL0` probably isn't "nearly empty".
 - **State:** `MachineStatus` `{READY, ACTIVE, STANDBY, CLEANING, EXPELL, PREPAREDRINK, MACHINEERROR,
   RECOVERING, RECOVERY, SPECIALTASK, INACTIVE, UNDEFINED}`; `ResetReason` e.g. `POWERON`.
   **[V] Brew lifecycle (observed live):** idle is `MachineStatus=INACTIVE` (asleep) or `ACTIVE`
@@ -273,10 +283,10 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
    `ProcessStatus`/counters move (§6).
 
 **Every item is now live-verified.** Remaining nice-to-haves: the exact machine ack/event JSON (none
-seen for a normal brew beyond the self-echo), `STOP`/`power`/`flush` behaviour (opcodes confirmed,
-effects not individually exercised; in particular whether `SWITCH_OFF` leaves Wi-Fi up so `SWITCH_ON`
-can wake the machine remotely, and which `MachineStatus` each lands in), and whether brews made
-outside the app (machine buttons, Home Assistant) count towards `servings_count` (§3).
+seen for a normal brew beyond the self-echo), `STOP`/`flush` behaviour (opcodes confirmed, effects
+not individually exercised; power is now [V], §5), the `MachineStatus` right after `SWITCH_ON`
+(lights came on; status not captured), the bin and hopper level semantics (§6), and whether brews
+made outside the app (machine buttons, Home Assistant) count towards `servings_count` (§3).
 
 ---
 

@@ -1,4 +1,4 @@
-"""The Power switch: disabled by default, state from MachineStatus, guarded commands."""
+"""The Power switch: enabled, state from MachineStatus, guarded commands."""
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -11,16 +11,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.spinn.const import DOMAIN
-from custom_components.spinn.switch import SpinnPowerSwitch
 
 from .conftest import THING
 
-
-@pytest.fixture
-def power_enabled():
-    """Enable the (default-disabled) Power switch for a test."""
-    with patch.object(SpinnPowerSwitch, "_attr_entity_registry_enabled_default", True):
-        yield
+POWER = "switch.kitchen_spinn_power"
 
 
 async def _set(hass: HomeAssistant, coordinator, **changes: str) -> None:
@@ -30,20 +24,44 @@ async def _set(hass: HomeAssistant, coordinator, **changes: str) -> None:
 
 async def _call(hass: HomeAssistant, service: str) -> None:
     await hass.services.async_call(
-        "switch", service, {"entity_id": "switch.kitchen_spinn_power"}, blocking=True
+        "switch", service, {"entity_id": POWER}, blocking=True
     )
 
 
-async def test_disabled_by_default(hass: HomeAssistant, coordinator) -> None:
-    entry = er.async_get(hass).async_get(
-        er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{THING}_power")
-    )
-    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
-    assert hass.states.get("switch.kitchen_spinn_power") is None
+async def test_enabled_by_default(hass: HomeAssistant, coordinator) -> None:
+    entry = er.async_get(hass).async_get(POWER)
+    assert entry is not None and entry.disabled_by is None
+    assert hass.states.get(POWER).state == STATE_ON
 
 
-async def test_state_follows_machine_status(hass: HomeAssistant, power_enabled, coordinator) -> None:
-    eid = "switch.kitchen_spinn_power"
+async def test_reenables_switch_an_earlier_build_disabled(hass: HomeAssistant, setup_spinn) -> None:
+    def before(entry) -> None:
+        er.async_get(hass).async_get_or_create(
+            "switch", DOMAIN, f"{THING}_power", config_entry=entry,
+            suggested_object_id="kitchen_spinn_power",
+            disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+        )
+
+    await setup_spinn(before=before)
+    assert er.async_get(hass).async_get(POWER).disabled_by is None
+    assert hass.states.get(POWER).state == STATE_ON
+
+
+async def test_leaves_user_disabled_switch_alone(hass: HomeAssistant, setup_spinn) -> None:
+    def before(entry) -> None:
+        er.async_get(hass).async_get_or_create(
+            "switch", DOMAIN, f"{THING}_power", config_entry=entry,
+            suggested_object_id="kitchen_spinn_power",
+            disabled_by=er.RegistryEntryDisabler.USER,
+        )
+
+    await setup_spinn(before=before)
+    assert er.async_get(hass).async_get(POWER).disabled_by is er.RegistryEntryDisabler.USER
+    assert hass.states.get(POWER) is None
+
+
+async def test_state_follows_machine_status(hass: HomeAssistant, coordinator) -> None:
+    eid = POWER
     assert hass.states.get(eid).state == STATE_ON  # ACTIVE
 
     for status, expected in (
@@ -60,7 +78,7 @@ async def test_state_follows_machine_status(hass: HomeAssistant, power_enabled, 
 
 
 async def test_turn_on_and_off_send_power_opcodes(
-    hass: HomeAssistant, power_enabled, coordinator
+    hass: HomeAssistant, coordinator
 ) -> None:
     await _set(hass, coordinator, MachineStatus="INACTIVE")
     with patch.object(coordinator, "_send_blocking") as send:
@@ -74,7 +92,7 @@ async def test_turn_on_and_off_send_power_opcodes(
 
 
 async def test_turn_off_refused_while_brewing(
-    hass: HomeAssistant, power_enabled, coordinator
+    hass: HomeAssistant, coordinator
 ) -> None:
     await _set(hass, coordinator, MachineStatus="PREPAREDRINK")
     with patch.object(coordinator, "_send_blocking") as send:
