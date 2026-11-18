@@ -271,6 +271,9 @@ effects not individually exercised).
 - **Tier 2 (no cloud): gated on one untested fact** — whether the machine's own TLS link to the ATS
   endpoint validates/pins the server cert+hostname. If not, redirect it (LAN DNS → local broker emulating
   the `$aws/things/…/shadow/…` + `<thing>/host` topics). No local path exists in firmware for normal use.
+  **Test it with [`tools/tls_probe.py`](../tools/tls_probe.py)** (steps: [TLS-PROBE.md](TLS-PROBE.md)): it
+  serves an untrusted certificate where the machine expects AWS IoT and reports whether the machine
+  refuses it, and if not, the MQTT session a local broker would have to serve.
 
 ---
 
