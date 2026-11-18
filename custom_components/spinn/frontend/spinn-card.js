@@ -1060,7 +1060,9 @@ class SpinnMachineCard extends SpinnBase {
 
     // ---- header
     const friendly = hass.states[e.status] && hass.states[e.status].attributes.friendly_name;
-    root.querySelector(".name").textContent = cfg.name || (friendly || "").replace(/ machine status$/i, "") || "Spinn";
+    // Default title keeps the device name but always says Spinn, so the card is easy to spot.
+    const device = (friendly || "").replace(/ machine status$/i, "").trim();
+    root.querySelector(".name").textContent = cfg.name || (!device ? "Spinn" : /spinn/i.test(device) ? device : `Spinn ${device}`);
     const statusEl = root.querySelector(".status");
     statusEl.textContent = offline ? "Offline" : error ? "Error" : brewing ? "Brewing" : cleaning ? st.label === "Expelling" ? "Expelling" : "Cleaning" : st.label;
     statusEl.style.color = TONE_COLOR[tone];
@@ -1263,7 +1265,7 @@ class SpinnRecipeCard extends SpinnBase {
     this.shadowRoot.innerHTML = `
       <style>${css}</style>
       <ha-card>
-        <div class="title">${recipeIconSvg("coffee", "rx-icon")} <span class="t-text">Recipes</span></div>
+        <div class="title">${recipeIconSvg("coffee", "rx-icon")} <span class="t-text">Spinn Recipes</span></div>
         <div class="grid"></div>
         <div class="hint"></div>
       </ha-card>`;
@@ -1287,7 +1289,7 @@ class SpinnRecipeCard extends SpinnBase {
       ? normalizeRecipes(cfg.recipes, machine)
       : machine.length ? machine : DEFAULT_RECIPES;
 
-    if (cfg.title) root.querySelector(".t-text").textContent = cfg.title;
+    root.querySelector(".t-text").textContent = cfg.title || "Spinn Recipes";
 
     const status = (stateStr(hass, e.status) || "").toUpperCase();
     const offline = !!e.connected && stateStr(hass, e.connected) === "off";
@@ -1461,7 +1463,7 @@ class SpinnRecipeEditorCard extends SpinnBase {
     this._ent = resolveEntities(hass, cfg);
     this._data = this._catalog();
     const root = this.shadowRoot;
-    root.querySelector(".t").textContent = cfg.title || "Recipe editor";
+    root.querySelector(".t").textContent = cfg.title || "Spinn Recipe Editor";
 
     const status = (stateStr(hass, this._ent.status) || "").toUpperCase();
     this._offline = !!this._ent.connected && stateStr(hass, this._ent.connected) === "off";

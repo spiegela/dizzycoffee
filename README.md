@@ -262,7 +262,7 @@ and brew whatever is in those slots.
 
 ```yaml
 type: custom:spinn-machine-card
-name: Kitchen Spinn        # optional title (defaults to the device name)
+name: Kitchen Spinn        # optional title (default: the device name, prefixed with "Spinn" if it lacks it)
 favorites: [0, 1, 2, 3]    # slots to show as chips (names/icons come from the cookbook)
 # favorites:               # or spell them out
 #   - { slot: 4, name: Morning mug, icon: mug }
@@ -288,7 +288,7 @@ seven slots from your cookbook, with names, sizes and which button each sits on.
 
 ```yaml
 type: custom:spinn-recipe-card
-title: Recipes
+# title: Spinn Recipes     # default
 # recipes: [4, 5, 6]                                       # just these slots
 # recipes:
 #   - { slot: 0, name: Crema Americano, icon: americano }  # or override names/icons
@@ -318,7 +318,7 @@ preview follows along. Then:
 
 ```yaml
 type: custom:spinn-recipe-editor-card
-# title: Recipe editor
+# title: Spinn Recipe Editor   # default
 # filter: custom           # start on: all | coffee | custom | special | milk
 # confirm: true            # ask before Brew once
 ```
