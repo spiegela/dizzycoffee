@@ -44,8 +44,12 @@ dizzycoffee/         Python package
   commands.py        Opt-in command path (brew, power, start/stop, flush)
   cli.py             `dizzy` command-line entry point
 custom_components/spinn/  Home Assistant integration + dashboard cards
-config.example.toml  Copy to config.toml (gitignored) and fill in, or use env vars
+tests/               Integration and client tests (Home Assistant's test harness)
+scripts/             deploy-to-ha.sh: put your checkout on a Home Assistant to try it
+config.example.toml  Copy to ~/.config/dizzycoffee/config.toml and fill in, or use env vars
 ```
+
+Working on the code? See [Development](#development).
 
 ## Quick start (read-only)
 
@@ -429,17 +433,68 @@ are removed, so it's safe to attach to an issue.
 
 ## Development
 
-Tests run against Home Assistant's own test harness, with Spinn's cloud stubbed out, so they never
-touch the network or a machine:
+Contributions are welcome. This section covers getting set up, where things live, testing, trying a
+branch on a real Home Assistant, and the rules the code follows.
+
+### Setup
+
+You need [`uv`](https://docs.astral.sh/uv/) and Python 3.14 for the tests (CI uses 3.14; the client
+itself runs on 3.11+).
 
 ```bash
+git clone https://github.com/spiegela/dizzycoffee && cd dizzycoffee
 uv venv --python 3.14
-uv pip install -r requirements_test.txt
-.venv/bin/python -m pytest
+uv pip install -r requirements_test.txt      # Home Assistant's test harness + the client's deps
+.venv/bin/python -m pytest                   # should be all green before you change anything
 ```
 
-To try a branch on your own Home Assistant before it's released, deploy it from your checkout
-with `scripts/deploy-to-ha.sh` (`--help` for every option).
+The client CLI needs no install: `uv run python -m dizzycoffee <command>`. It reads optional settings
+from `~/.config/dizzycoffee/config.toml` or `DIZZY_*` environment variables (see
+[`config.example.toml`](config.example.toml)). Your session token lives in
+`~/.config/dizzycoffee/session.json`, never in the repo.
+
+Handy for protocol work, all read-only: `uv run python -m dizzycoffee state --watch --raw` streams
+the full shadow, `… stats` prints the usage endpoints, and `--dry-run` on any actuating command
+shows the exact bytes without connecting.
+
+### Where things live
+
+| Path | What's there |
+|---|---|
+| `dizzycoffee/` | The client: REST (`api.py`), MQTT connection (`connection.py`), read-only shadow (`shadow.py`), the actuating command path (`commands.py`), recipe maths (`recipes.py`), CLI (`cli.py`) |
+| `custom_components/spinn/coordinator.py` | Everything the integration knows: the push stream and fallback poll, the command path and its guards, recipe operations, usage stats |
+| `custom_components/spinn/{sensor,binary_sensor,button,select,switch,event}.py` | One file per entity platform; entities read from the coordinator |
+| `custom_components/spinn/attention.py`, `stats.py` | Pure logic (Needs attention rules, stats parsing), easy to unit-test |
+| `custom_components/spinn/config_flow.py` | Sign-in, machine picker, reauth, options |
+| `custom_components/spinn/diagnostics.py` | The redacted diagnostics download |
+| `custom_components/spinn/services.py`, `services.yaml` | The `spinn.*` recipe services |
+| `custom_components/spinn/strings.json`, `translations/en.json` | Entity, config-flow and options text |
+| `custom_components/spinn/frontend/spinn-card.js` | The three dashboard cards: plain JavaScript, no build step |
+| `custom_components/spinn/_vendor/` | A verbatim copy of the client, so HACS installs work (see below) |
+| `tests/` | `conftest.py` stubs Spinn's cloud; one test file per area |
+
+### Tests
+
+Tests use Home Assistant's own test harness with Spinn's cloud stubbed out, so they never touch
+the network or a machine. `tests/conftest.py` swaps the coordinator's sign-in / fetch / shadow
+read (`_refresh_blocking`) for canned data. Its fixtures:
+
+- `coordinator`: an online, idle machine. `setup_spinn(**shadow)` gives you other starting states,
+  e.g. `await setup_spinn(MachineStatus="PREPAREDRINK")`.
+- `coordinator.async_set_updated_data({...})` changes state the same way a pushed shadow update
+  does.
+- Patch `coordinator._send_blocking` (the MQTT publish) for anything that would actuate the machine,
+  and give it a side effect that pushes the machine's reaction, as in `tests/test_commands.py`.
+
+Every behaviour change comes with a test. For a guard or safety check, make sure the test fails if
+you delete the check. `node --check custom_components/spinn/frontend/spinn-card.js` syntax-checks
+the cards. `uvx ruff check --select F,B custom_components dizzycoffee tests` catches unused imports
+and common bugs; CI doesn't enforce it yet.
+
+### Trying a branch on your Home Assistant
+
+Tests can't tell you how the real machine reacts. `scripts/deploy-to-ha.sh` puts your checkout on a
+Home Assistant (`--help` for every option).
 
 **Kubernetes** — copies the files into the Home Assistant pod with `kubectl exec`:
 
@@ -465,9 +520,69 @@ Either way the files land in `/config/custom_components/spinn` (`HA_CONFIG` if y
 elsewhere), the copy they replace is kept in `/config/.dizzycoffee/spinn.bak`, and `NO_RESTART=1`
 skips the restart. Redownloading in HACS / Marketplace puts the released version back.
 
-CI (`.github/workflows/ci.yml`) runs these tests, Home Assistant's **hassfest** validation and
-the **HACS** validation on every push and pull request. The tests also check that the bundled
-client in `custom_components/spinn/_vendor/` still matches `dizzycoffee/`.
+### Guidelines
+
+**Safety first: this drives a real appliance.**
+- Reading and actuating stay separate. Only `dizzycoffee/commands.py` publishes to `<thing>/host`;
+  `shadow.py` and the integration's read path never do.
+- In the integration, every actuation goes through the coordinator's command methods. They refuse
+  while the machine is offline or busy (`_ensure_online`, `_ensure_idle`) and run one at a time
+  (`_command_lock`; only Stop skips it). New actuating features use the same path; don't publish
+  from an entity.
+- CLI commands that actuate stay confirmation-gated (`YES` or `--yes`) and support `--dry-run`.
+- Nothing retries an actuating publish: a retry could brew twice.
+- Behaviour that hasn't been tried on a machine ships off by default or clearly labelled, like the
+  Power switch. Never point tests or CI at a real machine.
+
+**Protocol facts carry their evidence.** [`docs/PROTOCOL.md`](docs/PROTOCOL.md) tags each claim:
+**[C]** confirmed from the decompiled app, **[L]** still to verify live, **[V]** live-verified
+(with the date). When you verify something on your machine, upgrade its tag and note what you saw.
+Don't change verified timings (like the ~4 s between brew steps) without a live test.
+
+**Privacy.**
+- No credentials, tokens, certificates or captured personal data in the repo; `.gitignore` covers
+  the usual files.
+- The device certificate is fetched fresh and never written to disk; keep it that way.
+- New fields from Spinn that could identify someone must be redacted in `diagnostics.py`, and
+  `tests/test_diagnostics.py` checks for leaks. Strip ids, emails and serials from anything you
+  paste into an issue.
+
+**The bundled client.** HACS installs only get `custom_components/spinn/`, so the integration ships
+a copy of the client in `_vendor/`. After changing `dizzycoffee/{__init__,api,connection,commands,recipes}.py`:
+
+```bash
+cp dizzycoffee/{__init__,api,connection,commands,recipes}.py custom_components/spinn/_vendor/dizzycoffee/
+```
+
+`tests/test_vendor_sync.py` fails until you do.
+
+**Home Assistant conventions.**
+- The client is synchronous: call it through `hass.async_add_executor_job`, and import it lazily
+  inside methods, as the existing code does. MQTT callbacks arrive on an awscrt thread; hand them
+  to the event loop with `hass.loop.call_soon_threadsafe`.
+- Every entity has a `translation_key` with text in `strings.json`. `translations/en.json` is an
+  identical copy; change both.
+- Keep working on the minimum Home Assistant in `hacs.json` (2024.11.0). For example, the options
+  flow looks up its entry with `self.handler` because `self.config_entry` only arrived in 2024.12.
+- Don't add packages Home Assistant already ships (`requests`, `certifi`) to the manifest's
+  `requirements`; hassfest rejects them.
+
+**Versions.**
+- Bump `version` in `custom_components/spinn/manifest.json` for integration changes.
+- When the cards change, bump `CARD_VERSION` in both `const.py` and `frontend/spinn-card.js`, so
+  browsers load the new file.
+- Raise `homeassistant` in `hacs.json` if you start relying on a newer Home Assistant.
+
+**Docs.** User-facing changes update this README: the entity tables, services, card options and
+examples. Protocol discoveries go in `docs/PROTOCOL.md`.
+
+### Pull requests and CI
+
+- Keep pull requests focused, and say why as well as what.
+- Say what you verified on a real machine and what's covered only by tests.
+- CI (`.github/workflows/ci.yml`) must be green. It runs the tests (Python 3.14, Home Assistant
+  2026.10), **hassfest** and **HACS** validation on every pull request and push to `main`, plus a
+  weekly run.
 
 ## Credits
 

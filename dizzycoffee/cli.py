@@ -267,7 +267,7 @@ def cmd_send(cfg: Config, args) -> int:
     try:
         bytes.fromhex(args.hex)
     except ValueError:
-        raise SystemExit(f"--hex must be an even-length hex string, got {args.hex!r}")
+        raise SystemExit(f"--hex must be an even-length hex string, got {args.hex!r}") from None
     payload = args.hex.lower()
     if args.dry_run:
         print(f"[dry-run] raw send — nothing sent\n  would publish: {payload!r}  ->  <thing>/host")
