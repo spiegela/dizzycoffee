@@ -14,6 +14,11 @@ machine refuses it. If the machine accepts it, the probe also logs the MQTT sess
 the machine's client id, what it subscribes to and what it publishes. That's what a local broker
 would have to serve.
 
+> **Result on the author's machine (2026-11-18, firmware 2.11.219): refused.** All 7 connections
+> rejected the certificate with `TLSV1_ALERT_UNKNOWN_CA`, asking for the legacy endpoint
+> `a1gzieuy3t1932.iot.us-east-1.amazonaws.com`. The machine verifies its broker, so a DNS redirect
+> can't work. Run it yourself if your firmware differs.
+
 ## Before you start
 
 - **A computer on the same network as the machine** with [`uv`](https://docs.astral.sh/uv/)

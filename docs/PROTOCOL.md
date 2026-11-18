@@ -53,6 +53,11 @@ equivalent **ATS** endpoint (`a1gzieuy3t1932-ats.iot.…`, same account prefix +
 the same AWS IoT and accepts the same device cert, but presents an **Amazon Trust Services** server
 cert that validates against Amazon Root CA 1. Derive it by inserting `-ats` before `.iot.`.
 
+**[V] The machine itself uses the legacy endpoint.** The TLS probe (§8) saw it ask for
+`a1gzieuy3t1932.iot.us-east-1.amazonaws.com` (SNI) on every connection (firmware 2.11.219,
+2026-11-18). So its firmware trusts the legacy VeriSign/Symantec root, and it would need a firmware
+update from Spinn if AWS ever retired that endpoint. Clients like DizzyCoffee should keep using ATS.
+
 ---
 
 ## 2. Identity & auth
@@ -268,12 +273,16 @@ effects not individually exercised).
   link/api/devices/{thing}` (thing + cert) → ATS MQTT mutual-TLS → read shadow *and* publish a brew to
   `<thing>/host` — all working end to end against a real machine. The DizzyCoffee client implements
   the whole of Tier 1; command publishing is confirmation-gated.
-- **Tier 2 (no cloud): gated on one untested fact** — whether the machine's own TLS link to the ATS
-  endpoint validates/pins the server cert+hostname. If not, redirect it (LAN DNS → local broker emulating
-  the `$aws/things/…/shadow/…` + `<thing>/host` topics). No local path exists in firmware for normal use.
-  **Test it with [`tools/tls_probe.py`](../tools/tls_probe.py)** (steps: [TLS-PROBE.md](TLS-PROBE.md)): it
-  serves an untrusted certificate where the machine expects AWS IoT and reports whether the machine
-  refuses it, and if not, the MQTT session a local broker would have to serve.
+- **Tier 2 (no cloud) via a DNS redirect: [V] not possible.** The plan depended on the machine not
+  verifying its broker's certificate, so that LAN DNS could send it to a local broker emulating the
+  `$aws/things/…/shadow/…` + `<thing>/host` topics. Tested 2026-11-18 with
+  [`tools/tls_probe.py`](../tools/tls_probe.py) ([TLS-PROBE.md](TLS-PROBE.md)), firmware 2.11.219:
+  all 7 connections refused the probe's self-signed certificate with `TLSV1_ALERT_UNKNOWN_CA`. The
+  machine verifies the chain against roots built into its firmware, so only a certificate from that
+  CA would do, and nobody but Amazon can issue one. No local path exists in firmware for normal use.
+  What's left would change the machine itself: firmware that trusts a different CA (needs flash
+  access, and is only possible if flash encryption / secure boot aren't enabled), or a provisioning
+  step that sets the broker and CA, if the setup flow has one (not seen in the app so far).
 
 ---
 

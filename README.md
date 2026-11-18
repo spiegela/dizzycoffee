@@ -16,8 +16,9 @@ instead of the vendor's phone app.
 Spinn machines are AWS IoT Core appliances. The phone app signs you in, fetches a per-user
 X.509 client certificate for *your* machine, and talks to it over MQTT (mutual TLS). DizzyCoffee
 does the same handshake from Python, with **your own account**, so nothing here depends on any
-third-party cloud but Spinn's (the same one the app already uses). A fully-local, no-Spinn-cloud
-mode is described in the protocol doc as a future tier.
+third-party cloud but Spinn's (the same one the app already uses). A fully-local mode isn't possible
+without changing the machine's firmware: it verifies AWS's certificate, so it can't be redirected to a
+local broker ([`docs/TLS-PROBE.md`](docs/TLS-PROBE.md)).
 
 Everything is driven by **your** credentials and **your** machine's certificate, fetched fresh
 each session. No secrets are committed to this repo.
