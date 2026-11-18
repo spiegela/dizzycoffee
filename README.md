@@ -317,18 +317,24 @@ favorites: [0, 1, 2, 3]    # slots to show as chips (names/icons come from the c
 
 <table>
   <tr>
-    <td><img src="https://raw.githubusercontent.com/spiegela/dizzycoffee/main/docs/images/recipes-light.png" width="300" alt="Recipes card, light"></td>
-    <td><img src="https://raw.githubusercontent.com/spiegela/dizzycoffee/main/docs/images/recipes-dark.png" width="300" alt="Recipes card, dark"></td>
+    <td><img src="https://raw.githubusercontent.com/spiegela/dizzycoffee/main/docs/images/recipes-light.png" width="300" alt="Recipes card, On machine tab"></td>
+    <td><img src="https://raw.githubusercontent.com/spiegela/dizzycoffee/main/docs/images/recipes-dark.png" width="300" alt="Recipes card, Specials tab, dark theme"></td>
   </tr>
 </table>
 
-A grid of what's installed on the machine; tap a tile to brew it. With no options it shows the
-seven slots from your cookbook, with names, sizes and which button each sits on.
+Tap a tile to brew it. The **On machine** tab (the default) shows what's installed in the
+seven cookbook slots, with names, sizes and which button each sits on, and brews by slot. The
+**All / Coffee / Mine / Specials / Milk** tabs show every Spinn recipe; tapping one that isn't
+installed brews it once through the temporary slot (`spinn.brew_recipe`), so your cookbook isn't
+changed. Milk drinks pour their ristretto base and remind you to add the milk. A dot marks
+recipes that are installed.
 
 ```yaml
 type: custom:spinn-recipe-card
 # title: Spinn Recipes     # default
-# recipes: [4, 5, 6]                                       # just these slots
+# tab: special             # start on: machine (default) | all | coffee | custom | special | milk
+# tabs: false              # only the installed slots, no tabs
+# recipes: [4, 5, 6]                                       # just these slots (hides the tabs)
 # recipes:
 #   - { slot: 0, name: Crema Americano, icon: americano }  # or override names/icons
 # confirm: true

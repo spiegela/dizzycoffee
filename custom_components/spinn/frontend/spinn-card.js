@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const CARD_VERSION = "0.3.1";
+const CARD_VERSION = "0.3.2";
 
 /* -------------------------------------------------------------- shared maps */
 
@@ -850,6 +850,11 @@ class SpinnBase extends HTMLElement {
     if (!this._built) this._build();
     this._update();
   }
+  // device_id for spinn.* service calls (needed only with several machines).
+  _device() {
+    const ent = this._hass.entities && this._ent && this._hass.entities[this._ent.catalog];
+    return ent && ent.device_id ? { device_id: ent.device_id } : {};
+  }
   async _press(entityId) {
     if (!entityId) return;
     await this._hass.callService("button", "press", { entity_id: entityId });
@@ -1236,20 +1241,36 @@ const DEFAULT_RECIPES = [
   { slot: 6, name: "Small cup", icon: "espresso", role: "small" },
 ];
 
+// Tabs: what's installed on the machine, then the whole catalog by type.
+const RECIPE_TABS = [["machine", "On machine"], ["all", "All"], ["coffee", "Coffee"], ["custom", "Mine"], ["special", "Specials"], ["milk", "Milk"]];
+
 class SpinnRecipeCard extends SpinnBase {
   static getStubConfig(hass) {
     // No recipes in the stub: the card reads the machine's installed cookbook.
     return { type: "custom:spinn-recipe-card", prefix: detectPrefix(hass) || "spinn" };
   }
-  getCardSize() { return 5; }
+  getCardSize() { return 6; }
+
+  setConfig(config) {
+    super.setConfig(config);
+    this._tab = (config && config.tab) || "machine";
+  }
 
   _build() {
     const css = `
       ${BASE_CSS}
       .title { font-size:1.1rem; font-weight:600; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
       .title .rx-icon { width:24px; height:24px; color: var(--primary-text-color); }
+      .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+      .tabs:empty { display:none; }
+      .chip { font:inherit; font-size:.8rem; cursor:pointer; border:none; border-radius:999px; padding:5px 11px;
+        background: var(--spinn-chip-bg); color: var(--primary-text-color); }
+      .chip[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+      .chip .n { opacity:.6; margin-left:3px; font-variant-numeric: tabular-nums; }
+      .chip:focus-visible, .tile:focus-visible { outline:2px solid var(--primary-color); outline-offset:2px; }
       .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(96px,1fr)); gap:10px; }
-      .tile { border:none; cursor:pointer; border-radius:16px; padding:12px 8px 10px;
+      .grid.scroll { max-height: 452px; overflow-y:auto; padding:2px; margin:-2px; scrollbar-width: thin; }
+      .tile { border:none; cursor:pointer; border-radius:16px; padding:12px 8px 10px; position:relative;
         display:flex; flex-direction:column; align-items:center; gap:6px; font:inherit;
         background: var(--spinn-chip-bg); color: var(--primary-text-color);
         transition: transform .07s ease, background .15s ease, box-shadow .15s ease; }
@@ -1259,63 +1280,144 @@ class SpinnRecipeCard extends SpinnBase {
       .tile.active { box-shadow: inset 0 0 0 2px var(--primary-color); }
       .tile .rx-icon { width:52px; height:52px; color: var(--primary-text-color); }
       .tile .rn { font-size:.86rem; font-weight:600; text-align:center; line-height:1.1; }
-      .tile .rv { font-size:.72rem; color: var(--secondary-text-color); }
-      .hint { margin-top:10px; font-size:.76rem; color: var(--secondary-text-color); }
+      .tile .rv { font-size:.72rem; color: var(--secondary-text-color); text-align:center; }
+      .tile .pin { position:absolute; top:8px; right:9px; width:7px; height:7px; border-radius:50%; background: var(--primary-color); }
+      .empty { font-size:.85rem; color: var(--secondary-text-color); padding:8px 2px; }
+      .hint { margin-top:10px; font-size:.76rem; color: var(--secondary-text-color); min-height:1.1em; }
+      .hint.err { color: ${TONE_COLOR.error}; }
     `;
     this.shadowRoot.innerHTML = `
       <style>${css}</style>
       <ha-card>
         <div class="title">${recipeIconSvg("coffee", "rx-icon")} <span class="t-text">Spinn Recipes</span></div>
+        <div class="tabs" role="group" aria-label="Recipes to show"></div>
         <div class="grid"></div>
-        <div class="hint"></div>
+        <div class="hint" role="status"></div>
       </ha-card>`;
     this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
     this._built = true;
   }
 
+  // The full catalog (from the Recipe catalog sensor), with each recipe's installed slot.
+  _catalog() {
+    const st = this._ent.catalog && this._hass.states[this._ent.catalog];
+    const list = st && Array.isArray(st.attributes.recipes) ? st.attributes.recipes : [];
+    const cookbook = st && Array.isArray(st.attributes.cookbook) ? st.attributes.cookbook : [];
+    const slotOf = {};
+    for (const c of cookbook) if (c.role !== "temp" && slotOf[c.recipe_id] == null) slotOf[c.recipe_id] = c;
+    return { list, slotOf };
+  }
+
   _onClick(ev) {
-    const t = ev.composedPath().find((n) => n.dataset && n.dataset.action === "recipe");
+    const t = ev.composedPath().find((n) => n.dataset && n.dataset.action);
     if (!t || t.disabled) return;
-    this._brewSlot(Number(t.dataset.slot), t.dataset.name);
+    if (t.dataset.action === "tab") {
+      this._tab = t.dataset.tab;
+      this._flash = null;
+      return this._update();
+    }
+    if (t.dataset.action !== "recipe") return;
+    if (t.dataset.slot !== undefined && t.dataset.slot !== "") return this._brewSlot(Number(t.dataset.slot), t.dataset.name);
+    return this._brewRecipe(t.dataset.id, t.dataset.name, t.dataset.kind);
+  }
+
+  // A recipe that isn't installed: brew it once via the machine's temporary slot.
+  async _brewRecipe(id, name, kind) {
+    if (this._config.confirm && !window.confirm(`Brew ${name} now?`)) return;
+    this._say(kind === "milk" ? `Pouring a ristretto for your ${name}. Add the milk when it's done.` : `Brewing ${name}…`);
+    try {
+      await this._hass.callService("spinn", "brew_recipe", { recipe_id: id, ...this._device() });
+    } catch (err) {
+      this._say((err && err.message) || `Couldn't brew ${name}.`, true);
+    }
+  }
+
+  _say(text, err = false) {
+    this._flash = { text, err, until: Date.now() + 8000 };
+    const h = this.shadowRoot.querySelector(".hint");
+    h.textContent = text;
+    h.classList.toggle("err", err);
   }
 
   _update() {
     const hass = this._hass, cfg = this._config;
     const e = (this._ent = resolveEntities(hass, cfg));
     const root = this.shadowRoot;
+    root.querySelector(".t-text").textContent = cfg.title || "Spinn Recipes";
+
     // Source order: explicit YAML list > the machine's installed cookbook > generic demo set.
     const machine = machineRecipes(hass, e.recipe_select);
-    const recipes = Array.isArray(cfg.recipes) && cfg.recipes.length
-      ? normalizeRecipes(cfg.recipes, machine)
-      : machine.length ? machine : DEFAULT_RECIPES;
+    const explicit = Array.isArray(cfg.recipes) && cfg.recipes.length;
+    const cat = this._catalog();
+    const showTabs = !explicit && cfg.tabs !== false && cat.list.length > 0;
+    if (!showTabs) this._tab = "machine";
 
-    root.querySelector(".t-text").textContent = cfg.title || "Spinn Recipes";
+    const counts = { machine: (explicit ? cfg.recipes : machine.length ? machine : DEFAULT_RECIPES).length, all: cat.list.length };
+    for (const r of cat.list) counts[r.kind] = (counts[r.kind] || 0) + 1;
+    if (this._tab !== "machine" && !counts[this._tab]) this._tab = "machine";
+
+    // Tiles: {key, slot?, id?, kind?, name, icon, sub, installed}
+    let tiles;
+    if (this._tab === "machine") {
+      const recipes = explicit ? normalizeRecipes(cfg.recipes, machine) : machine.length ? machine : DEFAULT_RECIPES;
+      tiles = recipes.map((r) => ({
+        key: `s${r.slot}`, slot: r.slot, name: r.name || `Slot ${r.slot}`, icon: iconFor(r),
+        sub: [r.volume ? `${r.volume} ml` : null, ROLE_LABEL[r.role] || (r.volume ? null : `slot ${r.slot}`)].filter(Boolean).join(" · "),
+        title: `Slot ${r.slot}${r.custom ? " · your recipe" : ""}`,
+      }));
+    } else {
+      tiles = cat.list.filter((r) => this._tab === "all" || r.kind === this._tab).map((r) => {
+        const inst = cat.slotOf[r.id];
+        const size = (r.values || {}).size;
+        const sub = inst ? (ROLE_LABEL[inst.role] || `Slot ${inst.slot}`)
+          : r.kind === "milk" ? "Ristretto + milk" : size ? `${Math.round(size)} ml` : KIND_LABEL[r.kind] || "";
+        return { key: r.id, id: r.id, kind: r.kind, slot: inst ? inst.slot : undefined, name: r.name, icon: iconFor(r), sub,
+          installed: !!inst, title: inst ? `Installed: ${ROLE_LABEL[inst.role] || "slot " + inst.slot}` : "Brews once, without changing your cookbook" };
+      });
+    }
+
+    const tabsEl = root.querySelector(".tabs");
+    const tabSig = showTabs ? JSON.stringify([this._tab, counts]) : "";
+    if (tabsEl.dataset.sig !== tabSig) {
+      tabsEl.dataset.sig = tabSig;
+      tabsEl.innerHTML = showTabs ? RECIPE_TABS.filter(([k]) => k === "machine" || k === "all" || counts[k])
+        .map(([k, label]) => `<button class="chip" data-action="tab" data-tab="${k}" aria-pressed="${this._tab === k}">${label}<span class="n">${counts[k] || 0}</span></button>`).join("") : "";
+    }
+
+    const grid = root.querySelector(".grid");
+    const sig = JSON.stringify([this._tab, tiles]);
+    if (grid.dataset.sig !== sig) {
+      grid.dataset.sig = sig;
+      grid.classList.toggle("scroll", this._tab !== "machine");
+      grid.scrollTop = 0;
+      grid.innerHTML = tiles.length ? tiles.map((t) => `
+        <button class="tile" style="--rx-tint:${drinkTint(t.icon)}" data-action="recipe" data-slot="${t.slot ?? ""}" data-id="${esc(t.id || "")}"
+                data-kind="${esc(t.kind || "")}" data-name="${esc(t.name)}" title="${esc(t.title)}">
+          ${t.installed ? `<span class="pin" aria-hidden="true"></span>` : ""}
+          ${recipeIconSvg(t.icon)}
+          <span class="rn">${esc(t.name)}</span>
+          <span class="rv">${esc(t.sub)}</span>
+        </button>`).join("") : `<div class="empty">No recipes of this type.</div>`;
+    }
 
     const status = (stateStr(hass, e.status) || "").toUpperCase();
     const offline = !!e.connected && stateStr(hass, e.connected) === "off";
     const busy = isOn(hass, e.brewing) || isOn(hass, e.cleaning) || !!(STATUS[status] && STATUS[status].busy);
     const current = num(hass, e.recipe_select) ?? num(hass, e.recipe_number);
-
-    const grid = root.querySelector(".grid");
-    const sig = JSON.stringify(recipes);
-    if (grid.dataset.sig !== sig) {
-      grid.dataset.sig = sig;
-      grid.innerHTML = recipes.map((r) => `
-        <button class="tile" style="--rx-tint:${drinkTint(iconFor(r))}" data-action="recipe" data-slot="${esc(r.slot)}" data-name="${esc(r.name || "Slot " + r.slot)}" title="Slot ${esc(r.slot)}${r.custom ? " · your recipe" : ""}">
-          ${recipeIconSvg(iconFor(r))}
-          <span class="rn">${esc(r.name || "Slot " + r.slot)}</span>
-          <span class="rv">${esc([r.volume ? `${r.volume} ml` : null, ROLE_LABEL[r.role] || (r.volume ? null : `slot ${r.slot}`)].filter(Boolean).join(" · "))}</span>
-        </button>`).join("");
-    }
     grid.querySelectorAll(".tile").forEach((b) => {
-      b.disabled = offline || busy || !e.brew_button;
-      b.classList.toggle("active", Number(b.dataset.slot) === current);
+      const bySlot = b.dataset.slot !== "";
+      b.disabled = offline || busy || (bySlot ? !e.brew_button : !e.catalog);
+      b.classList.toggle("active", bySlot && Number(b.dataset.slot) === current);
     });
 
-    root.querySelector(".hint").textContent = offline
-      ? "Machine offline"
+    const hint = root.querySelector(".hint");
+    if (this._flash && this._flash.until > Date.now() && !offline) return;
+    this._flash = null;
+    hint.classList.remove("err");
+    hint.textContent = offline ? "Machine offline"
       : busy ? (isOn(hass, e.cleaning) ? "Cleaning…" : "Brewing…")
-        : !e.recipe_select ? "No recipe selector found" : "Tap a recipe to brew";
+        : this._tab === "machine" ? (!e.recipe_select ? "No recipe selector found" : "Tap a recipe to brew")
+          : "Tap to brew once. Dots mark recipes installed on the machine.";
   }
 }
 
@@ -1682,11 +1784,6 @@ class SpinnRecipeEditorCard extends SpinnBase {
     return out;
   }
 
-  _device() {
-    const ent = this._hass.entities && this._hass.entities[this._ent.catalog];
-    return ent && ent.device_id ? { device_id: ent.device_id } : {};
-  }
-
   async _call(service, data, okText) {
     this._working = true;
     this._syncEnabled();
@@ -1763,7 +1860,7 @@ window.customCards.push(
   {
     type: "spinn-recipe-card",
     name: "Spinn Recipes",
-    description: "A recipe browser that brews a cookbook slot on tap.",
+    description: "Tap to brew: what's on the machine, plus every Spinn recipe by type.",
     preview: true,
     documentationURL: "https://github.com/spiegela/dizzycoffee",
   },
