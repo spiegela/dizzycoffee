@@ -69,6 +69,9 @@ _LOGGER = logging.getLogger(__name__)
 _CONNECT_TIMEOUT = 15.0
 # Cookbook changes only when the user edits it in the app; re-read every 15 min.
 _COOKBOOK_TTL = 900.0
+# Usage stats (servings per recipe) change only when a drink is made: re-read
+# every 15 min, and on the next refresh after a brew finishes.
+_STATS_TTL = 900.0
 # Pause between staging a recipe in the temporary slot and brewing it, so the
 # cloud has pushed the staged recipe to the machine.
 _TEMP_SLOT_SETTLE = 1.5
@@ -243,6 +246,9 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # and the raw server records by id (needed for slider maths on writes).
         self.catalog: list[dict[str, Any]] = []
         self._library: dict[str, dict[str, Any]] = {}
+        # Account usage stats (stats.parse_user_stats), or None until fetched.
+        self.stats: dict[str, Any] | None = None
+        self._stats_at: float | None = None  # None = due now
         # Serialises commands, so a double-tapped Brew can't send two brews (the
         # second waits, then sees the machine busy). Stop doesn't take it.
         self._command_lock = asyncio.Lock()
@@ -280,6 +286,7 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         # Merge onto prior state so a partial document never drops keys.
         merged = {**(self.data or {}), **reported}
+        self._note_brew_end(merged)
         return merged
 
     def _build_client(self, token: dict[str, Any]):
@@ -326,6 +333,7 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.device = full
         self._refresh_cookbook_blocking(SpinnError)
+        self._refresh_stats_blocking(SpinnError)
         cert = full.get("certificate") or {}
         pem = cert.get("certificate_pem")
         key = cert.get("certificate_private_key")
@@ -378,6 +386,32 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (spinn_error, ValueError, KeyError, TypeError) as err:
             _LOGGER.debug("recipe/cookbook fetch failed (%s); keeping previous", err)
 
+    def _refresh_stats_blocking(self, spinn_error: type[Exception], force: bool = False) -> None:
+        """Re-read the account's usage stats if due. Never fails the refresh.
+
+        A failed or unparseable read keeps the previous stats and is retried
+        after the TTL, not on every refresh.
+        """
+        if not force and self._stats_at is not None and time.monotonic() - self._stats_at < _STATS_TTL:
+            return
+        if not hasattr(self._client, "get_user_stats"):  # older dizzycoffee
+            return
+        from .stats import parse_user_stats
+
+        self._stats_at = time.monotonic()
+        try:
+            parsed = parse_user_stats(self._client.get_user_stats(self.thing))
+        except (spinn_error, ValueError, KeyError, TypeError) as err:
+            _LOGGER.debug("usage stats fetch failed (%s); keeping previous", err)
+            return
+        if parsed is not None:
+            self.stats = parsed
+
+    def _note_brew_end(self, new: dict[str, Any]) -> None:
+        """Mark stats stale when a brew finishes, so the next refresh re-reads them."""
+        if (self.data or {}).get("MachineStatus") == "PREPAREDRINK" and new.get("MachineStatus") != "PREPAREDRINK":
+            self._stats_at = None
+
     def slot_recipe(self, slot: int | None) -> dict[str, Any] | None:
         """Cookbook entry for ``slot`` (name, recipe_id, ...), if known."""
         if slot is None:
@@ -400,7 +434,9 @@ class SpinnCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _apply_push(self, reported: dict[str, Any]) -> None:  # loop thread
         if not reported:
             return
-        self.async_set_updated_data({**(self.data or {}), **reported})
+        merged = {**(self.data or {}), **reported}
+        self._note_brew_end(merged)
+        self.async_set_updated_data(merged)
 
     # ---------------------------------------------------------- command guards
     def _ensure_online(self) -> None:

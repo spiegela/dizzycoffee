@@ -59,7 +59,14 @@
       "last_cleaning": { "name": "Last cleaning" },
       "last_descaling": { "name": "Last descaling" },
       "last_filter_change": { "name": "Last filter change" },
-      "recipe_catalog": { "name": "Recipe catalog" }
+      "recipe_catalog": { "name": "Recipe catalog" },
+      "servings": {
+        "name": "Servings",
+        "state_attributes": {
+          "top_recipe": { "name": "Top recipe" },
+          "recipes": { "name": "Recipes" }
+        }
+      }
     },
     "binary_sensor": {
       "connected": { "name": "Connected" },

@@ -154,11 +154,16 @@ POST/DELETE `recipe/api/recipes[/{id}]`. → **cookbook slots are the recipe num
 > - **[C]** `POST recipe/api/cookbook/reset` `{thing_name, slot}` · **[V]** `DELETE recipe/api/recipes/{id}` ·
 >   `GET recipe/api/products/{product_id}/sliders` (per-coffee slider overrides).
 
-**Usage stats ([L] shapes unknown).** `GET stats/api/user-stats` and `GET
-average-consumer/api/coffee-backlog` (both `IotFunctionsApi`, base `iot.spinn.com`) are read-only.
-Their response bodies aren't recorded yet. Like the recipe reads they may need `?thing_name=`, so the
-client tries that first and retries without it on 400/404. `dizzy stats` prints both responses
-verbatim, and the Home Assistant diagnostics download includes them, so their fields can be mapped.
+**[V] Usage stats (live-captured 2026-11-18).** Both read-only, base `iot.spinn.com`, bearer auth.
+The client sends `?thing_name=` first and retries without it on 400/404; the capture doesn't record
+which form answered.
+- `GET stats/api/user-stats` → `{id, schema_user_id, created_at, updated_at, servings_count,
+  stats: {<recipe_id>: {id, name, slug, type, recipe_count, host_version}}}`. Per **account**, not
+  per machine. `servings_count` equals the sum of the `recipe_count`s (2137 on the test account).
+  `type` is `spinn` / `custom`; `host_version` was null for every custom recipe.
+- `GET average-consumer/api/coffee-backlog` → `{id, schema_user_id, created_at, updated_at,
+  total_weight, orders: {active: [], archived: []}}`: bean orders from Spinn's marketplace (empty
+  on the test account), not brewing data.
 
 Other interfaces present: `ProductsFunctionsApi, OrderFunctionsApi, UserFunctionsApi,
 NotificationsFunctionsApi, RoasterFunctionsApi, MarketplaceFunctionsApi, IotWithoutAuthFunctionsApi`.
@@ -270,8 +275,8 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
 **Every item is now live-verified.** Remaining nice-to-haves: the exact machine ack/event JSON (none
 seen for a normal brew beyond the self-echo), `STOP`/`power`/`flush` behaviour (opcodes confirmed,
 effects not individually exercised; in particular whether `SWITCH_OFF` leaves Wi-Fi up so `SWITCH_ON`
-can wake the machine remotely, and which `MachineStatus` each lands in), and the usage-stats response
-shapes (§3).
+can wake the machine remotely, and which `MachineStatus` each lands in), and whether brews made
+outside the app (machine buttons, Home Assistant) count towards `servings_count` (§3).
 
 ---
 
