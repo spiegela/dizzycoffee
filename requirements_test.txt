@@ -1,0 +1,8 @@
+# Test dependencies for the Home Assistant integration (see .github/workflows/ci.yml).
+# pytest-homeassistant-custom-component pins a matching homeassistant release;
+# 0.13.375 = Home Assistant 2026.10.4 (needs Python 3.14).
+pytest-homeassistant-custom-component==0.13.375
+# The integration's own runtime requirements (manifest.json); HA skips pip in tests.
+awsiotsdk>=1.21
+certifi>=2024.2.2
+requests>=2.31

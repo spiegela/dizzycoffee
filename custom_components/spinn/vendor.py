@@ -7,8 +7,10 @@ import path — but only as a *fallback*: if a real ``dizzycoffee`` is already
 installed (e.g. in a development checkout), it is preferred and the bundled copy
 is never used.
 
-The vendored modules only need ``requests`` / ``awsiotsdk`` / ``certifi``, which
-are declared in the manifest ``requirements`` and installed by Home Assistant.
+The vendored modules only need ``requests`` / ``awsiotsdk`` / ``certifi``.
+``awsiotsdk`` is the manifest's one ``requirement`` (installed by Home
+Assistant); ``requests`` and ``certifi`` are Home Assistant's own dependencies,
+so they're always present (and hassfest forbids re-listing them).
 """
 from __future__ import annotations
 

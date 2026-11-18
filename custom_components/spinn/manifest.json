@@ -7,6 +7,6 @@
   "integration_type": "device",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/spiegela/dizzycoffee/issues",
-  "requirements": ["awsiotsdk>=1.21", "certifi>=2024.2.2", "requests>=2.31"],
+  "requirements": ["awsiotsdk>=1.21"],
   "version": "0.3.0"
 }
