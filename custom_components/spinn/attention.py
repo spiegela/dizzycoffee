@@ -24,8 +24,9 @@ from typing import Any
 
 from .const import DEFAULT_DEEP_CLEAN_EVERY, DEFAULT_DESCALE_EVERY
 
-# Space left in each bin right after emptying (live-observed). A higher value
-# seen on another model is treated as its maximum.
+# Space left in each bin right after emptying (live-observed). A reading above
+# this doesn't fit the model (space left can't exceed an empty bin), so it's
+# reported as unknown rather than as a confident "0 % full".
 CAPACITY_MAX: dict[str, int] = {"ResidueBinCapacity": 100, "DripTrayCapacity": 300}
 NEARLY_FULL = 0.8
 
@@ -84,12 +85,15 @@ def _count(data: dict[str, Any], key: str) -> int | None:
 def waste_fill(data: dict[str, Any] | None, capacity_key: str) -> float | None:
     """How full a bin is (0.0 empty .. 1.0 full) from its space-left counter.
 
-    ``None`` when the counter is missing or not a number.
+    ``None`` when the counter is missing, not a number, or above the known
+    maximum.
     """
     left = _count(data or {}, capacity_key)
     if left is None:
         return None
-    most = max(CAPACITY_MAX.get(capacity_key, left), left, 1)
+    most = CAPACITY_MAX.get(capacity_key)
+    if most is None or left > most:
+        return None
     # (most - left) / most rather than 1 - left / most: exact at the thresholds.
     return min(1.0, max(0.0, (most - left) / most))
 

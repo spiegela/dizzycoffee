@@ -267,6 +267,10 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
   During the pour `WaterVolume` falls, and `GrinderUserCounter`/`FilterCounter`/`DripTrayCapacity`/
   `ResidueBinCapacity` move; **no component-status keys appear** (they stayed absent at 28 keys even
   mid-brew, so `BrewerStatus` et al. are app-derived, not on the wire).
+- **[V] Not lifetime totals (2026-11-18):** `ShotCount` read `1` while the account's
+  `servings_count` was 2137 (§3), so it isn't lifetime shots; probably the shots in the current or
+  last drink **[L]**. `FilterCounter` read 41,810 about seven months after a filter change (≈ 600
+  drinks), so it counts something finer than drinks (water volume?) **[L]**.
 - **Brew bookkeeping:** `RecipeNumber`, `ShotCount`, `ColdbrewCounter`, `CoffeeCountersTtl`,
   `GrinderMasterCounter`, `GrinderUserCounter`, `FilterCounter`, `NoDeepCleanCounter`,
   `NoDescaleCounter`.

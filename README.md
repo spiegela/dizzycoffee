@@ -62,7 +62,7 @@ uv run python -m dizzycoffee login
 # 2. List the machines on your account (and confirm the certificate came through)
 uv run python -m dizzycoffee devices
 
-# 3. Print your machine's live state (consumables, status, shot count…)
+# 3. Print your machine's live state (consumables, status, counters…)
 uv run python -m dizzycoffee state
 
 # 4. Print your account's coffee stats exactly as Spinn returns them (JSON)
@@ -156,15 +156,15 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 | Process status | Current step while brewing or cleaning (enum), *diagnostic* |
 | Beans | Hopper level: `LEVEL0` (low), `LEVEL1`, `LEVEL2` (full), or `EMPTY` |
 | Water tank | Tank fill level |
-| Water volume | Water in the tank (ml) |
+| Water volume | Water in the tank, in your Home Assistant's units (ml, or fl. oz with US units) |
 | Water line status | Plumbed-in water line state, *diagnostic* |
 | Grounds bin level · Drip tray level | How full each bin is (%), worked out from the machine's space-left counters |
 | Grounds bin · Drip tray | Whether each bin is in place (`PLACED` / `REMOVED`; `FULL` if the machine says so) |
 | Grounds bin capacity · Drip tray capacity | The raw space-left counters, *diagnostic*: they count down as the bin fills (from 100 and 300 when empty) and reset when you empty it |
 | Recipe number | Slot of the recipe last selected on the machine |
-| Shot count | Lifetime shots brewed |
+| Shot count | The machine's `ShotCount`, *diagnostic*. Not a lifetime total (it reads 1 on a machine with 2,000+ servings); probably the shots in the current or last drink. For drinks made, use **Servings**. |
 | Cups since deep clean · Cups since descale | Maintenance counters, *diagnostic*. Attribute `interval`: the cups between them set in the [options](#options) (0 = no reminder). |
-| Filter counter | Uses since the water filter was changed, *diagnostic* |
+| Filter counter | The machine's water-filter counter, *diagnostic*. It counts something finer than drinks (tens of thousands after a few months); the unit isn't known yet. |
 | Grinder user counter · Grinder master counter | Grinder counters, *diagnostic* |
 | Cold brew counter | Cold brews made, *diagnostic* |
 | Last cleaning · Last descaling · Last filter change | Timestamps, *diagnostic* |
@@ -320,7 +320,7 @@ them automatically** — no manual resource step. Edit a dashboard → **Add car
 
 An illustration of the machine that tracks it live: the hopper's beans drop with the level, the
 status icons light up when water, drip tray or grounds need you, the glass fills while brewing,
-and the spinn ring sweeps green while it works. Beside it are level bars and the shot count.
+and the spinn ring sweeps green while it works. Beside it are level bars (bins as % full) and the number of drinks made.
 Below: one **Brew** button (it becomes **Stop** while busy), favorite chips, and a
 **Maintenance** section with deep-clean / descale / filter progress, a Hopper flush button,
 and water-line, Wi-Fi and firmware details. The cup buttons drawn on the machine are tappable
