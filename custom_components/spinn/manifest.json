@@ -1,8 +1,10 @@
 {
   "domain": "spinn",
   "name": "Spinn Coffee Maker",
+  "after_dependencies": ["frontend"],
   "codeowners": ["@spiegela"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/spiegela/dizzycoffee",
   "integration_type": "device",
   "iot_class": "cloud_push",
