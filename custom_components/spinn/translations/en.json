@@ -65,7 +65,28 @@
       "connected": { "name": "Connected" },
       "brewing": { "name": "Brewing" },
       "cleaning": { "name": "Cleaning" },
-      "error": { "name": "Error" }
+      "error": { "name": "Error" },
+      "needs_attention": {
+        "name": "Needs attention",
+        "state_attributes": {
+          "reasons": { "name": "Reasons" },
+          "warnings": { "name": "Warnings" }
+        }
+      }
+    },
+    "event": {
+      "brew": {
+        "name": "Brew",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "started": "Started",
+              "finished": "Finished",
+              "failed": "Failed"
+            }
+          }
+        }
+      }
     },
     "button": {
       "brew": { "name": "Brew" },
