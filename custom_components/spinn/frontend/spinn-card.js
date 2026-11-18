@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const CARD_VERSION = "0.3.2";
+const CARD_VERSION = "0.3.3";
 
 /* -------------------------------------------------------------- shared maps */
 
@@ -727,6 +727,10 @@ const stateStr = (hass, id) => {
 };
 const num = (hass, id) => { const v = stateStr(hass, id); return v !== undefined && !isNaN(+v) ? +v : undefined; };
 const isOn = (hass, id) => stateStr(hass, id) === "on";
+const attrNum = (hass, id, name) => {
+  const v = id && hass.states[id] ? hass.states[id].attributes[name] : undefined;
+  return v !== undefined && v !== null && !isNaN(+v) ? +v : undefined;
+};
 
 function ago(iso) {
   const t = Date.parse(iso);
@@ -1104,8 +1108,9 @@ class SpinnMachineCard extends SpinnBase {
     const beansG = root.querySelector(".beans");
     if (beansG) beansG.setAttribute("transform", `translate(0 ${((1 - Math.max(0, bf)) * 16).toFixed(1)})`);
 
-    const deepEvery = cfg.deep_clean_every ?? 100;
-    const descaleEvery = cfg.descale_every ?? 500;
+    // Card option > the integration's options (counter sensors' `interval`) > default.
+    const deepEvery = cfg.deep_clean_every ?? attrNum(hass, e.deep_clean_count, "interval") ?? 100;
+    const descaleEvery = cfg.descale_every ?? attrNum(hass, e.descale_count, "interval") ?? 500;
     const deepN = num(hass, e.deep_clean_count);
     const descN = num(hass, e.descale_count);
     const deepDue = deepEvery > 0 && deepN !== undefined && deepN >= deepEvery;

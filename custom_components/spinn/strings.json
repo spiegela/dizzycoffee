@@ -96,6 +96,21 @@
     },
     "select": {
       "recipe_slot": { "name": "Recipe slot" }
+    },
+    "switch": {
+      "power": { "name": "Power" }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Maintenance reminders",
+        "description": "How many cups between each job before Needs attention reports it due. These also set the maintenance bars on the Spinn Machine card. Use 0 to turn a reminder off.",
+        "data": {
+          "deep_clean_every": "Cups between deep cleans",
+          "descale_every": "Cups between descales"
+        }
+      }
     }
   }
 }

@@ -11,13 +11,23 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 from .const import (
+    CONF_DEEP_CLEAN_EVERY,
+    CONF_DESCALE_EVERY,
     CONF_DEVICE_NAME,
     CONF_THING_NAME,
     CONF_TOKEN,
+    DEFAULT_DEEP_CLEAN_EVERY,
+    DEFAULT_DESCALE_EVERY,
     DEFAULT_IOT_BASE,
     DEFAULT_MP_BASE,
     DOMAIN,
@@ -45,6 +55,11 @@ class SpinnConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Spinn."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SpinnOptionsFlow:
+        return SpinnOptionsFlow()
 
     def __init__(self) -> None:
         self._email: str | None = None
@@ -173,3 +188,47 @@ class SpinnConfigFlow(ConfigFlow, domain=DOMAIN):
                 return None, [], "invalid_auth"
             _LOGGER.debug("Spinn login failed: %s", err)
             return None, [], "cannot_connect"
+
+
+def _cups(maximum: int) -> NumberSelector:
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=0, max=maximum, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="cups"
+        )
+    )
+
+
+class SpinnOptionsFlow(OptionsFlow):
+    """Maintenance intervals: cups between deep cleans and between descales.
+
+    They drive the Needs attention sensor (deep_clean_due / descale_due), the
+    ``interval`` attribute on the cups-since counters, and the machine card's
+    maintenance bars. 0 turns a reminder off. Saving needs no reload: the
+    entities re-read the options straight away.
+    """
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(
+                data={key: int(value) for key, value in user_input.items()}
+            )
+
+        # Looked up via the handler (= entry id) rather than self.config_entry,
+        # which OptionsFlow only provides from Home Assistant 2024.12.
+        entry = self.hass.config_entries.async_get_entry(self.handler)
+        options = entry.options if entry else {}
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_DEEP_CLEAN_EVERY,
+                        default=options.get(CONF_DEEP_CLEAN_EVERY, DEFAULT_DEEP_CLEAN_EVERY),
+                    ): _cups(2000),
+                    vol.Required(
+                        CONF_DESCALE_EVERY,
+                        default=options.get(CONF_DESCALE_EVERY, DEFAULT_DESCALE_EVERY),
+                    ): _cups(5000),
+                }
+            ),
+        )

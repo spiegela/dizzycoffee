@@ -162,6 +162,29 @@ class SpinnClient:
             return body
         raise SpinnError("unexpected recipes payload", body=str(body)[:300])
 
+    # --- usage stats (read-only) --------------------------------------------
+    # Both endpoints come from the app's IotFunctionsApi (docs §3). Their
+    # response shapes aren't documented yet, so these return the parsed JSON
+    # as-is. Like the recipe reads they may need ?thing_name=, so that is tried
+    # first and dropped if the server answers 400/404.
+    def _get_with_optional_thing(self, path: str, thing_name: str | None) -> Any:
+        url = self._url(self.iot_base, path)
+        if thing_name:
+            try:
+                return self._request("GET", url, params={"thing_name": thing_name}, auth=True)
+            except SpinnError as err:
+                if err.status not in (400, 404):
+                    raise
+        return self._request("GET", url, auth=True)
+
+    def get_user_stats(self, thing_name: str | None = None) -> Any:
+        """GET stats/api/user-stats -> the account's coffee stats (shape [L])."""
+        return self._get_with_optional_thing("stats/api/user-stats", thing_name)
+
+    def get_coffee_backlog(self, thing_name: str | None = None) -> Any:
+        """GET average-consumer/api/coffee-backlog -> consumption vs. average (shape [L])."""
+        return self._get_with_optional_thing("average-consumer/api/coffee-backlog", thing_name)
+
     def get_installed_recipes(self, thing_name: str, library: list[dict] | None = None) -> list[dict]:
         """Cookbook slots joined to their recipe records, one dict per slot.
 

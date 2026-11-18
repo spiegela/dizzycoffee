@@ -15,7 +15,6 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import attention
 from .const import DOMAIN
 from .coordinator import SpinnCoordinator
 from .entity import SpinnEntity
@@ -119,9 +118,9 @@ class SpinnAttentionBinarySensor(SpinnEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        return attention.evaluate(self.coordinator.data).needed
+        return self.coordinator.current_attention().needed
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        result = attention.evaluate(self.coordinator.data)
+        result = self.coordinator.current_attention()
         return {"reasons": result.reasons, "warnings": result.warnings}

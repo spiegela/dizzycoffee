@@ -98,5 +98,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry when its options/data change."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Re-render entities when the entry changes; never reload.
+
+    This fires for every entry update, including the coordinator saving a
+    rotated session token, so reloading here would tear the integration down
+    on each token refresh. Options (the maintenance intervals) are read live
+    by the entities, so updating them is enough. Reauth reloads explicitly.
+    """
+    coordinator: SpinnCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is not None:
+        coordinator.async_update_listeners()

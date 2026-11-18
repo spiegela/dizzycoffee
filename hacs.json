@@ -1,6 +1,6 @@
 {
   "name": "Spinn Coffee Maker",
   "render_readme": true,
-  "homeassistant": "2024.8.0",
+  "homeassistant": "2024.11.0",
   "content_in_root": false
 }

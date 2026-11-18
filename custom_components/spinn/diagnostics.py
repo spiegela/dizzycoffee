@@ -1,9 +1,10 @@
 """Diagnostics download (Settings → Devices & Services → Spinn → ⋮ → Download diagnostics).
 
 What's in it: the live shadow (machine state), the REST device record, the
-installed cookbook, the recipe catalog summary, connection status, and what
-the Needs attention sensor sees. Enough to debug someone else's machine or
-firmware variant from an issue report.
+installed cookbook, the recipe catalog summary, connection status, what the
+Needs attention sensor sees, and a live read of the account's usage stats
+endpoints (whose response shapes aren't documented yet). Enough to debug
+someone else's machine or firmware variant from an issue report.
 
 What's taken out: the session token, email, the device certificate and private
 key, serial number, MAC addresses, Wi-Fi details, and the machine's thing name
@@ -21,7 +22,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
-from . import attention
 from .const import CARD_VERSION, CONF_THING_NAME, DOMAIN
 from .coordinator import SpinnCoordinator
 
@@ -116,7 +116,7 @@ async def async_get_config_entry_diagnostics(
 
     stream = getattr(coordinator, "_stream", None)
     last_exc = coordinator.last_exception
-    seen = attention.evaluate(coordinator.data)
+    seen = coordinator.current_attention()
     result["coordinator"] = {
         "last_update_success": coordinator.last_update_success,
         "last_exception": _redact(repr(last_exc), thing) if last_exc else None,
@@ -125,10 +125,13 @@ async def async_get_config_entry_diagnostics(
         if coordinator.update_interval
         else None,
         "selected_slot": coordinator.selected_slot,
+        "deep_clean_every": coordinator.deep_clean_every,
+        "descale_every": coordinator.descale_every,
     }
     result["attention"] = {"reasons": seen.reasons, "warnings": seen.warnings}
     result["shadow"] = _redact(dict(coordinator.data or {}), thing, keys=False)
     result["device"] = _redact(dict(coordinator.device or {}), thing)
     result["cookbook"] = _redact(list(coordinator.cookbook), thing)
     result["catalog"] = _redact(list(coordinator.catalog), thing)
+    result["stats"] = _redact(await coordinator.async_fetch_stats(), thing)
     return result

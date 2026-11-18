@@ -154,6 +154,12 @@ POST/DELETE `recipe/api/recipes[/{id}]`. → **cookbook slots are the recipe num
 > - **[C]** `POST recipe/api/cookbook/reset` `{thing_name, slot}` · **[V]** `DELETE recipe/api/recipes/{id}` ·
 >   `GET recipe/api/products/{product_id}/sliders` (per-coffee slider overrides).
 
+**Usage stats ([L] shapes unknown).** `GET stats/api/user-stats` and `GET
+average-consumer/api/coffee-backlog` (both `IotFunctionsApi`, base `iot.spinn.com`) are read-only.
+Their response bodies aren't recorded yet. Like the recipe reads they may need `?thing_name=`, so the
+client tries that first and retries without it on 400/404. `dizzy stats` prints both responses
+verbatim, and the Home Assistant diagnostics download includes them, so their fields can be mapped.
+
 Other interfaces present: `ProductsFunctionsApi, OrderFunctionsApi, UserFunctionsApi,
 NotificationsFunctionsApi, RoasterFunctionsApi, MarketplaceFunctionsApi, IotWithoutAuthFunctionsApi`.
 
@@ -196,6 +202,11 @@ Examples (payload is the literal ASCII hex):
   select-then-prepare sequence works, and **the slot byte equals the shadow's `RecipeNumber`** value
   (slot 5 ↔ `RecipeNumber="5"`), so it is not an extra-offset index. `RecipeNumber` indexes the
   shadow `recipes` array (§6).
+
+**Step spacing.** The verified brew went out with ~4 s between `SELECT` and `PREPARE` (the CLI's 3 s
+ack window plus a 1 s pause). The Home Assistant integration keeps that spacing (`COMMAND_STEP_GAP`)
+and publishes over its long-lived shadow connection when it's up, rather than opening a connection
+per command. Whether a shorter gap works is untested.
 
 **[V] Host echo / acks.** Publishing to `<thing>/host` while subscribed to it returns your own
 message back first (MQTT self-delivery) — e.g. publishing `"0505"` yields a `"0505"` message. Any
@@ -257,8 +268,10 @@ are JSON strings** (e.g. `"750"`, `"true"`), even numbers and booleans — parse
    `ProcessStatus`/counters move (§6).
 
 **Every item is now live-verified.** Remaining nice-to-haves: the exact machine ack/event JSON (none
-seen for a normal brew beyond the self-echo), and `STOP`/`power`/`flush` behaviour (opcodes confirmed,
-effects not individually exercised).
+seen for a normal brew beyond the self-echo), `STOP`/`power`/`flush` behaviour (opcodes confirmed,
+effects not individually exercised; in particular whether `SWITCH_OFF` leaves Wi-Fi up so `SWITCH_ON`
+can wake the machine remotely, and which `MachineStatus` each lands in), and the usage-stats response
+shapes (§3).
 
 ---
 

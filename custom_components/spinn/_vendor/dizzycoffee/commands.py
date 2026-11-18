@@ -57,16 +57,34 @@ class DeviceCommander:
         self._cert = cert_pem
         self._key = private_key_pem
         self._conn = None
+        self._owns_conn = True
+
+    @classmethod
+    def from_connection(cls, conn, thing_name: str) -> "DeviceCommander":
+        """Publish over an existing, already-connected MQTT connection.
+
+        Saves a TLS handshake per command when the caller already holds a
+        connection with the same certificate (e.g. a shadow subscription). The
+        connection stays the caller's: connect()/disconnect() leave it alone.
+        """
+        cmder = cls("", thing_name, "", "")
+        cmder._conn = conn
+        cmder._owns_conn = False
+        return cmder
 
     @property
     def _topic(self) -> str:
         return f"{self.thing}/host"
 
     def connect(self, timeout: float = 15.0) -> None:
+        if not self._owns_conn:
+            return
         self._conn = connection.build(self.endpoint, self._cert, self._key)
         self._conn.connect().result(timeout)
 
     def disconnect(self, timeout: float = 10.0) -> None:
+        if not self._owns_conn:
+            return
         if self._conn is not None:
             try:
                 self._conn.disconnect().result(timeout)

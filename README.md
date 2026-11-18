@@ -60,7 +60,14 @@ uv run python -m dizzycoffee devices
 
 # 3. Print your machine's live state (consumables, status, shot count…)
 uv run python -m dizzycoffee state
+
+# 4. Print your account's coffee stats exactly as Spinn returns them (JSON)
+uv run python -m dizzycoffee stats
 ```
+
+`stats` reads the two usage endpoints the app uses (`stats/api/user-stats` and
+`average-consumer/api/coffee-backlog`). Their fields aren't documented yet; if you run it, opening
+an issue with the output (minus anything personal) lets them become Home Assistant sensors.
 
 The login step writes a session token to `~/.config/dizzycoffee/session.json` (outside this
 repo). The device certificate is fetched fresh each run and never written to disk.
@@ -123,7 +130,8 @@ subscription (`cloud_push`) with a periodic re-read as a fallback.
 - **Recipe editor** — every recipe on your account with its real adjustable ranges; save
   your own versions and install them on the machine's buttons.
 - **Maintenance at a glance** — cups since deep clean / descale, filter uses, and when each was
-  last done.
+  last done, with reminder intervals you set in the integration's options.
+- **Power switch** (opt-in, see below) to wake the machine or switch it off.
 - **Three theme-aware dashboard cards**, registered automatically.
 - **Diagnostics download** with tokens, certificate, serial and MAC addresses removed, for
   bug reports.
@@ -149,7 +157,7 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 | Drip tray · Drip tray capacity | Drip tray fill, and its capacity *(diagnostic)* |
 | Recipe number | Slot of the recipe last selected on the machine |
 | Shot count | Lifetime shots brewed |
-| Cups since deep clean · Cups since descale | Maintenance counters, *diagnostic* |
+| Cups since deep clean · Cups since descale | Maintenance counters, *diagnostic*. Attribute `interval`: the cups between them set in the [options](#options) (0 = no reminder). |
 | Filter counter | Uses since the water filter was changed, *diagnostic* |
 | Grinder user counter · Grinder master counter | Grinder counters, *diagnostic* |
 | Cold brew counter | Cold brews made, *diagnostic* |
@@ -168,10 +176,10 @@ Entity ids are `<domain>.<device>_<name>`, e.g. `sensor.kitchen_spinn_beans`. It
 | Needs attention | Something needs doing: water or beans empty, grounds bin or drip tray full or out, deep clean or descale due, or a machine error. Attribute `reasons` lists what turned it on; `warnings` lists heads-ups that don't (water/beans low, bin/tray nearly full). |
 
 `reasons`: `machine_error`, `water_tank_empty`, `beans_empty`, `grounds_bin_full`,
-`grounds_bin_removed`, `drip_tray_full`, `drip_tray_removed`, `deep_clean_due` (100 cups since the
-last deep clean), `descale_due` (500 cups). `warnings`: `water_tank_low`, `beans_low`,
-`grounds_bin_nearly_full`, `drip_tray_nearly_full`. The rules match the machine card's status
-icons.
+`grounds_bin_removed`, `drip_tray_full`, `drip_tray_removed`, `deep_clean_due`, `descale_due`.
+`warnings`: `water_tank_low`, `beans_low`, `grounds_bin_nearly_full`, `drip_tray_nearly_full`. The
+rules match the machine card's status icons. Deep clean and descale are due after 100 and 500 cups
+by default; change that in the [options](#options).
 
 **Event**
 
@@ -206,6 +214,22 @@ Commands are refused, with an error saying why, while the shadow reports the mac
 rinsing, recovering); **Stop** always goes through while it's online. **Brew** waits for the
 machine to report that it's pouring: if it reports an error, or hasn't started within 60 s, the
 press fails with whatever the machine says needs attention ("the water tank is empty").
+
+Commands run one at a time, so a double-tapped **Brew** pours once (the second press finds the
+machine busy). **Stop** never waits behind another command. Commands go out over the connection
+the integration already holds for live updates, so there's no new connection per press; if that
+connection is down they use a short-lived one instead.
+
+**Switch** — *actuates your machine; disabled by default*
+
+| Entity | Does |
+|---|---|
+| Power | On while the machine is awake, off while it's asleep or in standby (`MachineStatus` `INACTIVE` / `STANDBY`). Turning it on sends `SWITCH_ON`, off sends `SWITCH_OFF`. Off is refused mid-task. Unavailable while the machine is offline. |
+
+> **Why it's disabled:** the power opcodes come from the app but haven't been tested on a
+> machine yet. If `SWITCH_OFF` turned the machine fully off, Wi-Fi included, Home Assistant
+> couldn't switch it back on. Try it once while you're standing next to the machine before you
+> rely on it: enable it on the device page (**Entities → Power → Enable**).
 
 **Select**
 
@@ -306,8 +330,8 @@ favorites: [0, 1, 2, 3]    # slots to show as chips (names/icons come from the c
 # favorites:               # or spell them out
 #   - { slot: 4, name: Morning mug, icon: mug }
 # machine_buttons: { small: 6, medium: 5, tall: 4 }   # default: from the cookbook; false = off
-# deep_clean_every: 100    # cups between deep cleans, for the progress bar (default 100)
-# descale_every: 500       # cups between descales (default 500)
+# deep_clean_every: 100    # cups between deep cleans (default: the integration's options)
+# descale_every: 500       # cups between descales (default: the integration's options)
 # maintenance: false       # hide the maintenance section
 # confirm: true            # ask before each brew
 # prefix: kitchen_spinn    # entity slug, if auto-detect guesses wrong
@@ -380,16 +404,25 @@ To choose a drawing yourself, set `icon` on a favorite or recipe tile: `espresso
 If you ever disable auto-registration, add the module manually as a dashboard resource:
 `/spinn_cards/spinn-card.js` (JavaScript module).
 
+### Options
+
+**Settings → Devices & Services → Spinn → Configure** sets how many cups go between deep cleans
+(default 100) and between descales (default 500); 0 turns a reminder off. They drive
+`deep_clean_due` / `descale_due` on **Needs attention**, the `interval` attribute on the
+cups-since counters, and the maintenance bars on the Spinn Machine card. Changes apply straight
+away, with no reload.
+
 ### Diagnostics
 
 **Settings → Devices & Services → Spinn → ⋮ → Download diagnostics** saves a JSON file with
 the machine's live state, the device record, the installed cookbook, the recipe catalog, the
-connection status and what **Needs attention** sees. The session token, email, device
+connection status, what **Needs attention** sees, the maintenance intervals, and a live read of
+your account's coffee stats (the same endpoints as `dizzy stats`). The session token, email, device
 certificate and key, serial number, MAC addresses, Wi-Fi details and the machine's thing name
 are removed, so it's safe to attach to an issue.
 
 > Publishing to `<thing>/host` **actuates the machine**. The Brew/Start/Stop/Flush buttons, the
-> recipe tiles, the machine's drawn cup buttons, **Brew once** and `spinn.brew_recipe` all do
+> Power switch, the recipe tiles, the machine's drawn cup buttons, **Brew once** and `spinn.brew_recipe` all do
 > exactly that — treat them like pressing the machine's own buttons. Saving, installing and
 > deleting recipes change your Spinn account's cookbook but never start a brew.
 
