@@ -439,16 +439,31 @@ uv pip install -r requirements_test.txt
 ```
 
 To try a branch on your own Home Assistant before it's released, deploy it from your checkout
-over SSH (on Home Assistant OS: the **Terminal & SSH** or **Advanced SSH & Web Terminal** add-on,
-with your key added):
+with `scripts/deploy-to-ha.sh` (`--help` for every option).
+
+**Kubernetes** — copies the files into the Home Assistant pod with `kubectl exec`:
 
 ```bash
-scripts/deploy-to-ha.sh root@homeassistant.local        # add a port if it isn't 22
+export HA_URL=https://ha.example.com HA_TOKEN=…   # a long-lived token: your profile → Security
+scripts/deploy-to-ha.sh k8s -n home-assistant              # finds app.kubernetes.io/name=home-assistant
+scripts/deploy-to-ha.sh k8s -n home deploy/home-assistant  # or name a pod / deploy / statefulset, or -l
 ```
 
-It copies `custom_components/spinn/` into `/config/custom_components/`, keeps the copy it replaced
-in `/config/.dizzycoffee/spinn.bak`, then checks the config and restarts Home Assistant
-(`NO_RESTART=1` to skip that). Redownloading in HACS / Marketplace puts the released version back.
+With `HA_URL` and `HA_TOKEN` set it restarts Home Assistant in place through its API: config check
+first, then waits for it to come back and reports whether the Spinn entry loaded. Without them it
+deletes the pod so its Deployment or StatefulSet replaces it, then checks the files survived (they
+won't if an init container or the image resets `custom_components`; use the API restart then).
+`-c CONTAINER` picks the container if the pod has sidecars, `--context` the cluster.
+
+**SSH** — e.g. the **Terminal & SSH** add-on on Home Assistant OS, with your key added:
+
+```bash
+scripts/deploy-to-ha.sh ssh root@homeassistant.local        # add a port if it isn't 22
+```
+
+Either way the files land in `/config/custom_components/spinn` (`HA_CONFIG` if your config lives
+elsewhere), the copy they replace is kept in `/config/.dizzycoffee/spinn.bak`, and `NO_RESTART=1`
+skips the restart. Redownloading in HACS / Marketplace puts the released version back.
 
 CI (`.github/workflows/ci.yml`) runs these tests, Home Assistant's **hassfest** validation and
 the **HACS** validation on every push and pull request. The tests also check that the bundled
