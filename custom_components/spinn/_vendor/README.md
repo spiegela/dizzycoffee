@@ -28,3 +28,6 @@ for f in __init__ api connection commands recipes; do
   diff -q dizzycoffee/$f.py custom_components/spinn/_vendor/dizzycoffee/$f.py
 done
 ```
+
+CI checks this too: `tests/test_vendor_sync.py` fails if any bundled module differs from the
+original, or if a module is added here without being added to the test.

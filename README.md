@@ -266,8 +266,8 @@ restart, then **Settings → Devices & Services → Add Integration → Spinn**.
 > **Bundled client — nothing extra to install.** The integration ships a verbatim copy of the
 > `dizzycoffee` client under
 > [`custom_components/spinn/_vendor/`](custom_components/spinn/_vendor/), so Marketplace and HACS installs
-> (including Home Assistant OS) work out of the box; its dependencies (`awsiotsdk`, `certifi`,
-> `requests`) install automatically from the manifest. If a real `dizzycoffee` is already
+> (including Home Assistant OS) work out of the box; `awsiotsdk` installs automatically from the
+> manifest, and `requests` / `certifi` already come with Home Assistant. If a real `dizzycoffee` is already
 > importable in your HA environment (e.g. a development checkout) it is preferred, and the
 > bundled copy is used only as a fallback. See the
 > [`_vendor/` README](custom_components/spinn/_vendor/README.md) for how to re-sync the copy
@@ -386,6 +386,21 @@ are removed, so it's safe to attach to an issue.
 > recipe tiles, the machine's drawn cup buttons, **Brew once** and `spinn.brew_recipe` all do
 > exactly that — treat them like pressing the machine's own buttons. Saving, installing and
 > deleting recipes change your Spinn account's cookbook but never start a brew.
+
+## Development
+
+Tests run against Home Assistant's own test harness, with Spinn's cloud stubbed out, so they never
+touch the network or a machine:
+
+```bash
+uv venv --python 3.14
+uv pip install -r requirements_test.txt
+.venv/bin/python -m pytest
+```
+
+CI (`.github/workflows/ci.yml`) runs these tests, Home Assistant's **hassfest** validation and
+the **HACS** validation on every push and pull request. The tests also check that the bundled
+client in `custom_components/spinn/_vendor/` still matches `dizzycoffee/`.
 
 ## Credits
 
